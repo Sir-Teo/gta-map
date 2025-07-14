@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle, Polygon as MatplotlibPolygon, Patch
 from matplotlib.collections import PatchCollection
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
 import random
 import math
 from noise import pnoise2
@@ -151,19 +152,66 @@ class GTAMapGenerator:
         return self.get_map_data()
 
     def _generate_heightmap(self):
+        """Generate a realistic heightmap with distinct mountain ranges and terrain features"""
+        # Use multiple frequency Perlin noise for natural terrain
         scale = self.grid_width * 0.005
+        mountain_scale = scale * 2
+        
+        # Create a base heightmap
+        self.heightmap = np.zeros((self.grid_height, self.grid_width))
+        
+        # Generate 1-3 distinct mountain ranges
+        mountain_count = random.randint(1, 3)
+        mountain_centers = []
+        
+        for _ in range(mountain_count):
+            # Place mountain ranges away from the edges
+            mx = random.uniform(self.width * 0.2, self.width * 0.8)
+            my = random.uniform(self.height * 0.2, self.height * 0.8)
+            mountain_centers.append((mx, my))
+        
+        # Generate the base terrain
         for y in range(self.grid_height):
             for x in range(self.grid_width):
                 nx = x / self.grid_width - 0.5
                 ny = y / self.grid_height - 0.5
-                e = (1 * pnoise2(1 * nx * scale, 1 * ny * scale, octaves=4, persistence=0.5, lacunarity=2.0, base=self.seed) +
+                
+                # Base continent shape (large features)
+                e = (1.0 * pnoise2(1 * nx * scale, 1 * ny * scale, octaves=4, persistence=0.5, lacunarity=2.0, base=self.seed) +
                      0.5 * pnoise2(2 * nx * scale, 2 * ny * scale, octaves=4, persistence=0.5, lacunarity=2.0, base=self.seed+1) +
                      0.25 * pnoise2(4 * nx * scale, 4 * ny * scale, octaves=4, persistence=0.5, lacunarity=2.0, base=self.seed+2))
                 e /= (1 + 0.5 + 0.25)
+                
                 # Create a coastal falloff
                 d = min(1, (math.sqrt(nx**2 + ny**2) / math.sqrt(0.5**2 + 0.5**2))**0.5)
-                e = (e + 1) / 2 # map to 0-1
-                self.heightmap[y, x] = e * (1 - d * 0.5) # lower edges to form island
+                e = (e + 1) / 2  # map to 0-1
+                e = e * (1 - d * 0.5)  # lower edges to form island
+                
+                # Add mountain ranges
+                mountain_influence = 0
+                for mx, my in mountain_centers:
+                    # Convert mountain center to grid coordinates
+                    grid_mx = mx / self.grid_size
+                    grid_my = my / self.grid_size
+                    
+                    # Distance to mountain center
+                    dist = math.sqrt((x - grid_mx)**2 + (y - grid_my)**2)
+                    max_dist = min(self.grid_width, self.grid_height) * 0.3
+                    
+                    if dist < max_dist:
+                        # Create a distance-based falloff for mountain height
+                        falloff = 1 - (dist / max_dist)**2
+                        
+                        # Add some noise to the mountain
+                        mountain_noise = pnoise2(x * mountain_scale * 0.1, y * mountain_scale * 0.1, 
+                                              octaves=6, persistence=0.6, lacunarity=2.2, base=self.seed+10) 
+                        
+                        # Higher persistence and octaves make more detailed mountains
+                        mountain_height = falloff * (mountain_noise * 0.5 + 0.5) * 0.4
+                        mountain_influence = max(mountain_influence, mountain_height)
+                
+                # Combine base terrain with mountains
+                self.heightmap[y, x] = min(0.95, e + mountain_influence)  # Cap at 0.95 to avoid pure white
 
     def _define_land_and_water(self):
         self.land_mask = self.heightmap > self.water_level
@@ -181,55 +229,91 @@ class GTAMapGenerator:
             self._generate_lake()
     
     def _generate_river(self):
-        """Generate a winding river from edge to either another edge or a low point"""
-        # Choose a starting edge
-        edge = random.choice(['top', 'right', 'bottom', 'left'])
+        """Generate a more visible and realistic winding river"""
+        # Increase the number of rivers and their width for visibility
+        # Choose a starting edge - prefer top (mountains) or sides for more natural flow
+        edge = random.choice(['top', 'top', 'right', 'left', 'bottom'])
         
+        # Generate start point and initial direction
         if edge == 'top':
-            start_x = random.randint(0, self.width)
+            start_x = random.randint(int(self.width * 0.2), int(self.width * 0.8))
             start_y = 0
-            direction = (random.uniform(-0.5, 0.5), 1)  # Flow downward with variance
+            direction = (random.uniform(-0.3, 0.3), 1)  # Flow downward with slight variance
         elif edge == 'right':
             start_x = self.width
-            start_y = random.randint(0, self.height)
-            direction = (-1, random.uniform(-0.5, 0.5))  # Flow leftward with variance
+            start_y = random.randint(int(self.height * 0.2), int(self.height * 0.8))
+            direction = (-1, random.uniform(-0.3, 0.3))  # Flow leftward with variance
         elif edge == 'bottom':
-            start_x = random.randint(0, self.width)
+            start_x = random.randint(int(self.width * 0.2), int(self.width * 0.8))
             start_y = self.height
-            direction = (random.uniform(-0.5, 0.5), -1)  # Flow upward with variance
+            direction = (random.uniform(-0.3, 0.3), -1)  # Flow upward with variance
         else:  # left
             start_x = 0
-            start_y = random.randint(0, self.height)
-            direction = (1, random.uniform(-0.5, 0.5))  # Flow rightward with variance
+            start_y = random.randint(int(self.height * 0.2), int(self.height * 0.8))
+            direction = (1, random.uniform(-0.3, 0.3))  # Flow rightward with variance
             
-        # Normalize direction
+        # Normalize direction vector
         magnitude = (direction[0]**2 + direction[1]**2)**0.5
         direction = (direction[0]/magnitude, direction[1]/magnitude)
         
-        # Generate river path with Perlin noise influence
+        # Use heightmap to influence river flow - rivers tend to flow toward lower elevations
+        # Increase river width for better visibility
         river_points = [(start_x, start_y)]
         x, y = start_x, start_y
-        river_width = random.uniform(15, 30)
-        river_length = random.randint(100, max(self.width, self.height))
-        perlin_scale = 0.01
-        perlin_strength = 50
+        
+        # Make rivers wider and more prominent
+        river_width = random.uniform(30, 60)  # Increased width
+        river_length = random.randint(int(max(self.width, self.height) * 0.5), 
+                                   max(self.width, self.height)) # Longer rivers
+        
+        # Parameters for more natural river curves
+        perlin_scale = 0.005  # Reduced scale for smoother curves
+        perlin_strength = 70  # Increased strength for more pronounced curves
+        terrain_influence = 0.5  # How much the terrain affects river direction
         
         for i in range(river_length):
-            # Add Perlin noise influence to direction
-            perlin_val = pnoise2(x * perlin_scale, y * perlin_scale, octaves=2, 
-                                 persistence=0.5, lacunarity=2.0, base=self.seed+100)
+            # Get current grid position
+            grid_x = min(int(x / self.grid_size), self.grid_width-2)
+            grid_y = min(int(y / self.grid_size), self.grid_height-2)
+            
+            # Terrain influence - rivers tend to flow downhill (along gradient)
+            if 0 <= grid_x < self.grid_width-1 and 0 <= grid_y < self.grid_height-1:
+                # Calculate terrain gradient (simplified)
+                dx_terrain = self.heightmap[grid_y, grid_x+1] - self.heightmap[grid_y, grid_x]
+                dy_terrain = self.heightmap[grid_y+1, grid_x] - self.heightmap[grid_y, grid_x]
+                
+                # Normalize terrain gradient if non-zero
+                terrain_mag = math.sqrt(dx_terrain**2 + dy_terrain**2)
+                if terrain_mag > 0.001:
+                    dx_terrain /= terrain_mag
+                    dy_terrain /= terrain_mag
+            else:
+                dx_terrain, dy_terrain = 0, 0
+            
+            # Add Perlin noise influence for natural meandering
+            perlin_val = pnoise2(x * perlin_scale, y * perlin_scale, octaves=3, 
+                               persistence=0.6, lacunarity=2.0, base=self.seed+100)
             noise_angle = perlin_val * 2 * math.pi  # Convert to angle
             
-            # Blend original direction with noise direction
-            noise_influence = 0.3  # How much noise affects direction
-            nx = direction[0] * (1-noise_influence) + math.cos(noise_angle) * noise_influence
-            ny = direction[1] * (1-noise_influence) + math.sin(noise_angle) * noise_influence
+            # Blend original direction, terrain influence, and noise
+            # Rivers should mostly follow the terrain gradient (downhill) with some meandering
+            nx = direction[0] * (0.4) - dx_terrain * terrain_influence + math.cos(noise_angle) * (0.2)
+            ny = direction[1] * (0.4) - dy_terrain * terrain_influence + math.sin(noise_angle) * (0.2)
             
-            # Move in the new direction
-            x += nx * 10  # Step size
-            y += ny * 10
+            # Renormalize direction
+            mag = math.sqrt(nx**2 + ny**2)
+            if mag > 0.001:
+                nx, ny = nx/mag, ny/mag
             
-            # Check if we've gone outside the map
+            # Update direction for next iteration (rivers tend to maintain their course)
+            direction = (nx, ny)
+            
+            # Take a step
+            step_size = 15  # Larger step size for more efficient river generation
+            x += nx * step_size
+            y += ny * step_size
+            
+            # Check if we've gone outside the map or reached water
             if x < 0 or x >= self.width or y < 0 or y >= self.height:
                 break
                 
@@ -237,18 +321,19 @@ class GTAMapGenerator:
             
         # Only add if we have enough points
         if len(river_points) > 10:
+            # Create a more visibly blue river
             self.water_bodies.append({
                 'type': 'river',
                 'points': river_points,
                 'width': river_width,
-                'color': '#0066cc'
+                'color': '#0077cc'  # More vibrant blue
             })
             
-            # Update land mask to reflect the river
+            # Update land mask to reflect the river with a wider area of influence
             for i in range(len(river_points)-1):
                 x1, y1 = river_points[i]
                 x2, y2 = river_points[i+1]
-                for t in np.linspace(0, 1, 20):  # Sample points along the line
+                for t in np.linspace(0, 1, 30):  # More sample points for smoother rivers
                     x = int(x1 * (1-t) + x2 * t)
                     y = int(y1 * (1-t) + y2 * t)
                     
@@ -256,9 +341,9 @@ class GTAMapGenerator:
                     grid_x = min(int(x / self.grid_size), self.grid_width-1)
                     grid_y = min(int(y / self.grid_size), self.grid_height-1)
                     
-                    # Set a circle around each point as water
+                    # Set a wider circle around each point as water
                     if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
-                        river_grid_width = max(1, int(river_width / self.grid_size / 2))
+                        river_grid_width = max(2, int(river_width / self.grid_size / 2))  # Wider river
                         for dx in range(-river_grid_width, river_grid_width+1):
                             for dy in range(-river_grid_width, river_grid_width+1):
                                 if dx*dx + dy*dy <= river_grid_width*river_grid_width:
@@ -492,71 +577,624 @@ class GTAMapGenerator:
         self._add_polyline_as_road(ring_points, 'highway')
 
     def _place_districts(self):
+        # Find viable land points for district centers
         land_points = np.argwhere(self.land_mask)
-        if len(land_points) < self.district_count:
-            print("Warning: Not enough land to place districts.")
+        if len(land_points) == 0:
+            print("Warning: No land to place districts on.")
             return
 
         # Prioritize flatter areas for certain districts
         gradient_x, gradient_y = np.gradient(self.heightmap)
         slope = np.sqrt(gradient_x**2 + gradient_y**2)
         flat_areas = np.argwhere((self.land_mask) & (slope < 0.01))
-
-        district_types = ['downtown', 'commercial', 'industrial', 'residential', 'suburban', 'hills', 'beach', 'port', 'airport', 'park']
-        random.shuffle(district_types)
-
+        
+        # Ensure we have enough districts to include all important types
+        self.district_count = max(self.district_count, 12)  # Ensure enough districts for all types
+        
+        # Define the key district types we want to ensure are included
+        key_districts = ['downtown', 'commercial', 'industrial', 'residential', 'suburban', 
+                         'hills', 'beach', 'port', 'airport', 'park']
+        
+        # Place important districts first, then fill the rest with random types
         centers = []
-        for i in range(self.district_count):
-            district_type = district_types[i % len(district_types)]
+        districts_placed = []
+        
+        # Explicitly place key district types first
+        for district_type in key_districts:
             point = None
-            if district_type in ['downtown', 'commercial', 'airport'] and len(flat_areas) > 0:
-                idx = np.random.choice(len(flat_areas))
-                point = flat_areas[idx]
+            
+            # Special placement logic for different district types
+            if district_type in ['downtown', 'commercial']:
+                # Downtown and commercial districts should be central
+                center_area = np.array([self.grid_width/2, self.grid_height/2])
+                distances = np.sum((land_points - center_area) ** 2, axis=1)
+                closest_points = land_points[np.argsort(distances)[:20]]
+                if len(closest_points) > 0:
+                    point = closest_points[np.random.choice(len(closest_points))]
+            
+            elif district_type == 'airport':
+                # Airports need large flat areas
+                if len(flat_areas) > 0:
+                    # Sort by distance from edge for easier access
+                    edge_dist = np.minimum(
+                        np.minimum(flat_areas[:, 0], self.grid_width - flat_areas[:, 0]),
+                        np.minimum(flat_areas[:, 1], self.grid_height - flat_areas[:, 1])
+                    )
+                    airport_candidates = flat_areas[edge_dist < self.grid_width/4]
+                    if len(airport_candidates) > 0:
+                        point = airport_candidates[np.random.choice(len(airport_candidates))]
+                    else:
+                        point = flat_areas[np.random.choice(len(flat_areas))]
+            
             elif district_type == 'beach':
-                beach_points = np.argwhere((self.heightmap > self.water_level) & (self.heightmap < self.beach_level))
+                # Beaches should be near water at beach level
+                beach_points = np.argwhere((self.heightmap > self.water_level) & 
+                                          (self.heightmap < self.beach_level))
                 if len(beach_points) > 0:
-                    idx = np.random.choice(len(beach_points))
-                    point = beach_points[idx]
-
+                    point = beach_points[np.random.choice(len(beach_points))]
+            
+            elif district_type == 'port':
+                # Ports should be right next to water
+                water_edges = []
+                for i in range(1, self.grid_height-1):
+                    for j in range(1, self.grid_width-1):
+                        if self.land_mask[i, j]:
+                            # Check if adjacent to water
+                            if (not self.land_mask[i-1, j] or not self.land_mask[i+1, j] or
+                                not self.land_mask[i, j-1] or not self.land_mask[i, j+1]):
+                                water_edges.append([i, j])
+                if water_edges:
+                    point = np.array(water_edges[np.random.choice(len(water_edges))])
+            
+            # Default placement if special placement failed
             if point is None:
-                idx = np.random.choice(len(land_points))
-                point = land_points[idx]
-
-            centers.append(point * self.grid_size)
-
-        vor = Voronoi([c.tolist() for c in centers])
-        for i, center in enumerate(centers):
-            self.districts.append({
-                'center': center,
-                'type': district_types[i % len(district_types)],
-                'vertices': [],
-                'radius': random.uniform(150, 300)
-            })
+                if len(land_points) > 0:
+                    point = land_points[np.random.choice(len(land_points))]
+                else:
+                    continue  # Skip if no valid points
+            
+            # Convert grid coordinates to world coordinates
+            point_world = point * self.grid_size
+            
+            # Check if this point is far enough from existing centers
+            too_close = False
+            min_distance = 300  # Minimum distance between district centers
+            for existing_center in centers:
+                if np.linalg.norm(existing_center - point_world) < min_distance:
+                    too_close = True
+                    break
+            
+            if not too_close:
+                centers.append(point_world)
+                districts_placed.append(district_type)
+            
+            # Stop if we've reached our district count
+            if len(centers) >= self.district_count:
+                break
+        
+        # Fill remaining district slots with random types if needed
+        remaining_districts = self.district_count - len(centers)
+        if remaining_districts > 0:
+            random_types = key_districts.copy()
+            random.shuffle(random_types)
+            
+            for i in range(remaining_districts):
+                district_type = random_types[i % len(random_types)]
+                
+                # Find a point that's not too close to existing centers
+                attempts = 0
+                found_point = False
+                while attempts < 20 and not found_point:
+                    idx = np.random.choice(len(land_points))
+                    point = land_points[idx]
+                    point_world = point * self.grid_size
+                    
+                    # Check distance from existing centers
+                    too_close = False
+                    for existing_center in centers:
+                        if np.linalg.norm(existing_center - point_world) < 250:
+                            too_close = True
+                            break
+                    
+                    if not too_close:
+                        centers.append(point_world)
+                        districts_placed.append(district_type)
+                        found_point = True
+                    
+                    attempts += 1
+        
+        # Generate Voronoi diagram to define district boundaries
+        if len(centers) >= 3:  # Voronoi requires at least 3 points
+            vor = Voronoi([c.tolist() for c in centers])
+            
+            # Extract district vertices from Voronoi diagram
+            for i, (center, district_type) in enumerate(zip(centers, districts_placed)):
+                vertices = []
+                for region_idx in vor.point_region:
+                    if vor.point_region[i] == region_idx:
+                        region = vor.regions[region_idx]
+                        if not -1 in region and len(region) > 0:
+                            for vertex_idx in region:
+                                if vertex_idx >= 0:
+                                    vertex = vor.vertices[vertex_idx].tolist()
+                                    # Clip to map boundaries
+                                    vertex[0] = max(0, min(vertex[0], self.width))
+                                    vertex[1] = max(0, min(vertex[1], self.height))
+                                    vertices.append(vertex)
+                
+                self.districts.append({
+                    'center': center,
+                    'type': district_type,
+                    'vertices': vertices,
+                    'radius': random.uniform(200, 400),
+                    'polygon': None
+                })
+                
+                # Create polygon for district if we have vertices
+                if len(vertices) >= 3:
+                    from shapely.geometry import Polygon
+                    try:
+                        self.districts[-1]['polygon'] = Polygon(vertices)
+                    except Exception:
+                        pass  # Skip invalid polygons
 
     def _generate_arterial_grid(self):
-        """Generate an organic, distorted grid of arterial roads using Perlin noise."""
-        noise_scale = 0.001
-        noise_strength = 150
-
-        # Vertical arterials
-        x = 0
-        while x <= self.width:
-            pts = []
-            for y_step in range(0, self.height + self.grid_size, self.grid_size):
-                offset = pnoise2(x * noise_scale, y_step * noise_scale, octaves=2, persistence=0.5, lacunarity=2.0, base=self.seed + 10) * noise_strength
-                pts.append((x + offset, y_step))
-            self._add_polyline_as_road(pts, 'arterial')
-            x += self.arterial_spacing
-
-        # Horizontal arterials
-        y = 0
-        while y <= self.height:
-            pts = []
-            for x_step in range(0, self.width + self.grid_size, self.grid_size):
-                offset = pnoise2(x_step * noise_scale, y * noise_scale, octaves=2, persistence=0.5, lacunarity=2.0, base=self.seed + 20) * noise_strength
-                pts.append((x_step, y + offset))
-            self._add_polyline_as_road(pts, 'arterial')
-            y += self.arterial_spacing
+        """Generate an organic, realistic road network based on terrain and districts."""
+        # We'll create several types of roads:
+        # 1. Major highways connecting districts
+        # 2. Radial roads emanating from downtown/central areas
+        # 3. Curved roads following terrain contours
+        # 4. Local roads within districts
+        
+        # Use heightmap and district locations to guide road placement
+        major_nodes = []
+        
+        # Add district centers as major nodes
+        for district in self.districts:
+            if 'center' in district:
+                major_nodes.append((district['center'][0], district['center'][1]))
+        
+        # If no districts, create some default nodes
+        if not major_nodes:
+            major_nodes = [(self.width/2, self.height/2)]
+            for angle in np.linspace(0, 2*np.pi, 8, endpoint=False):
+                r = min(self.width, self.height) * 0.4
+                x = self.width/2 + r * np.cos(angle)
+                y = self.height/2 + r * np.sin(angle)
+                major_nodes.append((x, y))
+        
+        # Connect districts with natural roads following terrain
+        self._connect_major_nodes(major_nodes)
+        
+        # Generate radial roads from downtown/center
+        downtown_centers = []
+        for district in self.districts:
+            if district['type'] in ['downtown', 'commercial']:
+                downtown_centers.append((district['center'][0], district['center'][1]))
+        
+        # If no downtown, use map center
+        if not downtown_centers:
+            downtown_centers = [(self.width/2, self.height/2)]
+        
+        # Generate radial roads from each downtown center
+        for center in downtown_centers:
+            self._generate_radial_roads(center)
+        
+        # Generate contour-following roads based on heightmap
+        self._generate_terrain_following_roads()
+        
+        # Add some random connector roads
+        self._generate_random_connectors(major_nodes)
+    
+    def _connect_major_nodes(self, nodes):
+        """Connect major nodes with a clear, organized road network using a hierarchical approach."""
+        if len(nodes) < 2:
+            return
+            
+        # First, identify important nodes that should be connected by highways
+        # This will typically include downtown, commercial centers, and airports
+        downtown_nodes = []
+        important_nodes = []
+        other_nodes = []
+        
+        # Classify nodes based on district types
+        for i, node in enumerate(nodes):
+            # Find the district this node belongs to
+            node_district = None
+            for district in self.districts:
+                if 'center' in district and district['center'][0] == node[0] and district['center'][1] == node[1]:
+                    node_district = district
+                    break
+            
+            if node_district:
+                if node_district['type'] in ['downtown']:
+                    downtown_nodes.append((i, node))
+                elif node_district['type'] in ['commercial', 'airport', 'port']:
+                    important_nodes.append((i, node))
+                else:
+                    other_nodes.append((i, node))
+            else:
+                other_nodes.append((i, node))
+        
+        # If we don't have a downtown node, use the center of the map
+        if not downtown_nodes:
+            center_node = (self.width/2, self.height/2)
+            closest_idx = min(range(len(nodes)), key=lambda i: ((nodes[i][0] - center_node[0])**2 + 
+                                                           (nodes[i][1] - center_node[1])**2))
+            downtown_nodes = [(closest_idx, nodes[closest_idx])]
+        
+        # Calculate distances between all nodes
+        n = len(nodes)
+        edges = []
+        for i in range(n):
+            for j in range(i+1, n):
+                dist = np.sqrt((nodes[i][0] - nodes[j][0])**2 + (nodes[i][1] - nodes[j][1])**2)
+                
+                # Classify edge type based on endpoints
+                i_important = any(idx == i for idx, _ in downtown_nodes + important_nodes)
+                j_important = any(idx == j for idx, _ in downtown_nodes + important_nodes)
+                
+                # Priority score: lower is higher priority
+                # Connect downtown to downtown first, then downtown to important, then important to important
+                priority = 1
+                if any(idx == i for idx, _ in downtown_nodes) and any(idx == j for idx, _ in downtown_nodes):
+                    priority = 0
+                elif (any(idx == i for idx, _ in downtown_nodes) and any(idx == j for idx, _ in important_nodes)) or \
+                     (any(idx == j for idx, _ in downtown_nodes) and any(idx == i for idx, _ in important_nodes)):
+                    priority = 0.5
+                elif i_important and j_important:
+                    priority = 1
+                else:
+                    priority = 2 + dist * 0.0001  # Lower priority, influenced slightly by distance
+                
+                edges.append((i, j, dist, priority))
+        
+        # Sort edges by priority (first) and then by distance (second)
+        edges.sort(key=lambda x: (x[3], x[2]))
+        
+        # Union-find data structure for Kruskal's algorithm
+        parent = list(range(n))
+        
+        def find(x):
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+        
+        def union(x, y):
+            parent[find(x)] = find(y)
+        
+        # Kruskal's algorithm to create minimum spanning tree with priority
+        mst_edges = []
+        for i, j, dist, priority in edges:
+            if find(i) != find(j):
+                union(i, j)
+                mst_edges.append((i, j, priority))
+        
+        # Add some additional connections to create cycles (more realistic)
+        # Focus on adding more connections between important nodes
+        num_extra_edges = min(n//2, len(edges) - len(mst_edges))  # More extra edges
+        extra_count = 0
+        
+        for i, j, dist, priority in edges:
+            if not any((i, j, p) in mst_edges or (j, i, p) in mst_edges for p in [0, 0.5, 1, 2]):
+                # Prefer adding connections between important nodes
+                i_important = any(idx == i for idx, _ in downtown_nodes + important_nodes)
+                j_important = any(idx == j for idx, _ in downtown_nodes + important_nodes)
+                
+                if (i_important or j_important) and dist < min(self.width, self.height) * 0.3:
+                    mst_edges.append((i, j, priority))
+                    extra_count += 1
+                elif extra_count < num_extra_edges // 2 and dist < min(self.width, self.height) * 0.2:
+                    mst_edges.append((i, j, priority))
+                    extra_count += 1
+                
+                if extra_count >= num_extra_edges:
+                    break
+        
+        # Create roads between connected nodes with appropriate road types
+        noise_scale = 0.005
+        noise_strength = 300
+        
+        for i, j, priority in mst_edges:
+            start = nodes[i]
+            end = nodes[j]
+            
+            # Set road type based on priority
+            if priority <= 0.5:  # Downtown connections get highways
+                road_type = 'highway'
+                road_width = 15  # Wider
+                curve_factor = 0.7  # Less curvy (more direct)
+            elif priority <= 1.0:  # Important node connections get arterials
+                road_type = 'arterial'
+                road_width = 12
+                curve_factor = 0.8
+            else:  # Everything else gets collector roads
+                road_type = 'collector'
+                road_width = 8
+                curve_factor = 1.0
+                
+            # Check if path is over water, if so, create a bridge
+            is_bridge = False
+            mid_x = (start[0] + end[0]) / 2
+            mid_y = (start[1] + end[1]) / 2
+            mid_grid_x = int(mid_x / self.grid_size)
+            mid_grid_y = int(mid_y / self.grid_size)
+            if 0 <= mid_grid_x < self.grid_width and 0 <= mid_grid_y < self.grid_height:
+                if not self.land_mask[mid_grid_y, mid_grid_x]:
+                    is_bridge = True
+            
+            # Generate curved path between points
+            dist = np.sqrt((start[0] - end[0])**2 + (start[1] - end[1])**2)
+            num_points = max(5, int(dist / 40))  # More points for smoother curves
+            
+            # Create base line with controlled curve
+            path = []
+            for t in np.linspace(0, 1, num_points):
+                x = start[0] * (1-t) + end[0] * t
+                y = start[1] * (1-t) + end[1] * t
+                
+                # Add perlin noise deviation
+                angle = math.atan2(end[1] - start[1], end[0] - start[0])
+                perp_x = math.sin(angle)
+                perp_y = -math.cos(angle)
+                
+                # Less noise for straighter roads
+                noise_val = pnoise2(x * noise_scale, y * noise_scale, octaves=2, 
+                                   persistence=0.5, lacunarity=2.0, base=self.seed+5)
+                
+                # Scale noise by distance from endpoints (less curve near start/end)
+                # This creates more natural looking road connections
+                endpoint_factor = min(t, 1-t) * 2  # 0 at endpoints, 1 in middle
+                offset = noise_val * noise_strength * endpoint_factor * curve_factor
+                
+                # Apply offset perpendicular to direction
+                x += perp_x * offset
+                y += perp_y * offset
+                
+                path.append((x, y))
+                
+            # Add as road or bridge
+            if is_bridge:
+                self.bridges.append({
+                    'points': path,
+                    'width': road_width,
+                    'type': 'bridge'
+                })
+            else:
+                self.roads.append({
+                    'points': path,
+                    'width': road_width,
+                    'type': road_type
+                })
+    
+    def _generate_radial_roads(self, center):
+        """Generate roads radiating from a central point (like downtown)."""
+        num_radials = random.randint(5, 8)  # Number of main radial roads
+        
+        for i in range(num_radials):
+            angle = (i / num_radials) * 2 * np.pi
+            # Add some randomness to the angle
+            angle += random.uniform(-0.2, 0.2)
+            
+            # Calculate the end point at the map edge
+            # Find intersection with map boundary
+            dist = max(self.width, self.height) * 1.5  # Ensure it's long enough
+            end_x = center[0] + dist * np.cos(angle)
+            end_y = center[1] + dist * np.sin(angle)
+            
+            # Clip to map boundaries
+            if end_x < 0:
+                t = -center[0] / (end_x - center[0])
+                end_y = center[1] + t * (end_y - center[1])
+                end_x = 0
+            elif end_x > self.width:
+                t = (self.width - center[0]) / (end_x - center[0])
+                end_y = center[1] + t * (end_y - center[1])
+                end_x = self.width
+            
+            if end_y < 0:
+                t = -center[1] / (end_y - center[1])
+                end_x = center[0] + t * (end_x - center[0])
+                end_y = 0
+            elif end_y > self.height:
+                t = (self.height - center[1]) / (end_y - center[1])
+                end_x = center[0] + t * (end_x - center[0])
+                end_y = self.height
+            
+            # Create a slightly curved radial road
+            points = []
+            num_points = 10
+            
+            for j in range(num_points + 1):
+                t = j / num_points
+                x = center[0] + t * (end_x - center[0])
+                y = center[1] + t * (end_y - center[1])
+                
+                # Add slight curve using Perlin noise
+                if 0 < j < num_points:
+                    noise_val = pnoise2(x * 0.002, y * 0.002, octaves=2, persistence=0.5, 
+                                      lacunarity=2.0, base=self.seed + i * 100)
+                    perp_x = -(end_y - center[1])
+                    perp_y = (end_x - center[0])
+                    perp_len = np.sqrt(perp_x**2 + perp_y**2)
+                    if perp_len > 0:
+                        perp_x /= perp_len
+                        perp_y /= perp_len
+                        
+                        # Scale curve based on distance from center
+                        curve_scale = 100 * t * (1-t)
+                        x += perp_x * noise_val * curve_scale
+                        y += perp_y * noise_val * curve_scale
+                
+                points.append((x, y))
+            
+            # Main radials are arterial roads
+            self._add_polyline_as_road(points, 'arterial')
+    
+    def _generate_terrain_following_roads(self):
+        """Generate roads that follow terrain contours."""
+        # Use heightmap gradients to find contour lines
+        gradient_x, gradient_y = np.gradient(self.heightmap)
+        gradient_magnitude = np.sqrt(gradient_x**2 + gradient_y**2)
+        
+        # Find areas with moderate slope - good for contour roads
+        moderate_slope = ((gradient_magnitude > 0.01) & (gradient_magnitude < 0.05) & self.land_mask)
+        contour_candidates = np.argwhere(moderate_slope)
+        
+        # Select some random starting points for contour roads
+        num_contour_roads = random.randint(3, 7)
+        
+        if len(contour_candidates) == 0:
+            return
+            
+        for _ in range(num_contour_roads):
+            if len(contour_candidates) == 0:
+                break
+                
+            idx = np.random.choice(len(contour_candidates))
+            start = contour_candidates[idx] * self.grid_size
+            
+            # Follow the contour by moving perpendicular to the gradient
+            points = [(start[1], start[0])]  # Note: we swap x and y here because of numpy indexing
+            current = start.copy()
+            
+            # Generate a contour road of reasonable length
+            for _ in range(100):
+                # Get gradient at current position
+                grid_x = int(current[0])
+                grid_y = int(current[1])
+                
+                # Check if we're out of bounds
+                if (grid_y >= self.grid_height or grid_x >= self.grid_width or 
+                    grid_y < 0 or grid_x < 0):
+                    break
+                    
+                # Get gradient direction (perpendicular to contour)
+                gx = gradient_x[grid_y, grid_x]
+                gy = gradient_y[grid_y, grid_x]
+                
+                if abs(gx) + abs(gy) < 0.001:  # Too flat, stop
+                    break
+                    
+                # Move perpendicular to gradient (along contour)
+                # Normalize gradient vector
+                mag = np.sqrt(gx*gx + gy*gy)
+                if mag > 0:
+                    gx /= mag
+                    gy /= mag
+                    
+                # Perpendicular direction
+                px, py = -gy, gx
+                
+                # Random direction along contour
+                if random.random() < 0.5:
+                    px, py = -px, -py
+                    
+                # Step size along contour
+                step_size = 20
+                
+                # Update current position
+                current[0] += px * step_size
+                current[1] += py * step_size
+                
+                # Add some noise for natural roads
+                noise_val = pnoise2(current[0] * 0.01, current[1] * 0.01, 
+                                  octaves=2, persistence=0.5, lacunarity=2.0,
+                                  base=self.seed)
+                
+                current[0] += noise_val * 5
+                current[1] += noise_val * 5
+                
+                # Ensure we stay within map bounds
+                current[0] = max(0, min(current[0], self.grid_width - 1))
+                current[1] = max(0, min(current[1], self.grid_height - 1))
+                
+                # Only add point if still on land
+                grid_x = int(current[0])
+                grid_y = int(current[1])
+                
+                if grid_y < self.grid_height and grid_x < self.grid_width and grid_y >= 0 and grid_x >= 0:
+                    if self.land_mask[grid_y, grid_x]:
+                        points.append((current[1] * self.grid_size, current[0] * self.grid_size))
+                    else:
+                        break  # Stop at water
+                else:
+                    break  # Stop at map boundary
+            
+            # Add contour road if long enough
+            if len(points) >= 10:
+                self._add_polyline_as_road(points, 'collector')
+    
+    def _generate_random_connectors(self, major_nodes):
+        """Generate some random connector roads between areas."""
+        # Add some random roads connecting different areas
+        num_connectors = random.randint(5, 10)
+        
+        for _ in range(num_connectors):
+            # Pick a random point on an existing road
+            if not self.roads:
+                continue  # No roads to connect to
+                
+            road_idx = random.randint(0, len(self.roads) - 1)
+            road = self.roads[road_idx]
+            
+            if len(road['points']) < 2:
+                continue
+                
+            # Pick a random point on this road
+            point_idx = random.randint(0, len(road['points']) - 1)
+            start = road['points'][point_idx]
+            
+            # Generate a random direction
+            angle = random.uniform(0, 2 * np.pi)
+            
+            # Road length
+            length = random.uniform(300, 700)
+            
+            # Calculate end point
+            end_x = start[0] + length * np.cos(angle)
+            end_y = start[1] + length * np.sin(angle)
+            
+            # Clip to map boundaries
+            end_x = max(0, min(end_x, self.width))
+            end_y = max(0, min(end_y, self.height))
+            
+            # Generate curved road
+            points = [start]
+            
+            # Create a curved path
+            num_points = random.randint(4, 8)
+            for i in range(1, num_points):
+                t = i / num_points
+                
+                # Linear interpolation
+                x = start[0] + t * (end_x - start[0])
+                y = start[1] + t * (end_y - start[1])
+                
+                # Add some noise for curves
+                noise_val = pnoise2(x * 0.01, y * 0.01, octaves=2, persistence=0.6, 
+                                 lacunarity=2.0, base=self.seed + _ * 100)
+                
+                # Create perpendicular vector for offset
+                dx = end_x - start[0]
+                dy = end_y - start[1]
+                
+                # Normalize
+                length = max(0.001, np.sqrt(dx*dx + dy*dy))
+                perpx, perpy = -dy/length, dx/length
+                
+                # Apply curve
+                curve_factor = 100 * noise_val * t * (1-t)
+                x += perpx * curve_factor
+                y += perpy * curve_factor
+                
+                points.append((x, y))
+            
+            points.append((end_x, end_y))
+            
+            # Add connector road (collector or local road)
+            road_type = 'collector' if random.random() < 0.3 else 'local'
+            self._add_polyline_as_road(points, road_type)
 
     def _add_polyline_as_road(self, pts, rtype):
         """Split a polyline into land and bridge segments and store them."""
@@ -1062,55 +1700,219 @@ class GTAMapGenerator:
         fig, ax = plt.subplots(1, 1, figsize=(16, 16))
         ax.set_facecolor('#4a90e2') # Water color
 
-        # Draw terrain
-        cmap = LinearSegmentedColormap.from_list('terrain', ['#a67c52', '#348c31', '#2d5016', '#6b6b6b'])
+        # Draw terrain with heightmap-based coloring
+        cmap = mcolors.LinearSegmentedColormap.from_list('terrain', ['#a67c52', '#348c31', '#2d5016', '#6b6b6b'])
         ax.imshow(self.heightmap, cmap=cmap, extent=(0, self.width, self.height, 0), vmin=self.water_level, vmax=1.0)
         ax.imshow(np.invert(self.land_mask), cmap='Blues_r', extent=(0, self.width, self.height, 0), alpha=0.5, vmin=0, vmax=1)
+        
+        # District color scheme with better visual distinction
+        district_colors = {
+            'residential': '#FFEDA0',  # Pale yellow
+            'commercial': '#FA9FB5',  # Pink
+            'industrial': '#BCBDDC',  # Light purple
+            'downtown': '#FD8D3C',    # Orange
+            'suburban': '#EDF8B1',    # Very light yellow
+            'beach': '#FFFFCC',       # Pale sand
+            'airport': '#C7E9B4',     # Light green-blue
+            'hills': '#74C476',       # Medium green
+            'port': '#6BAED6',        # Light blue
+            'park': '#41AB5D'         # Green
+        }
+        
+        # Draw district boundaries and labels
+        district_patches = []
+        district_labels = []
+        
+        for district in self.districts:
+            if 'polygon' in district and district['polygon'] is not None and district['polygon'].is_valid:
+                color = district_colors.get(district['type'], 'white')
+                # Use matplotlib's Polygon for rendering
+                coords = list(district['polygon'].exterior.coords)
+                patch = MatplotlibPolygon(coords, alpha=0.5, fc=color, ec='#555555', lw=1.5, zorder=1)
+                ax.add_patch(patch)
+                
+                # Add district label at center point
+                if 'center' in district:
+                    district_labels.append({
+                        'pos': district['center'],
+                        'text': district['type'].upper(),
+                        'color': '#333333',
+                        'size': 14 if district['type'] in ['downtown', 'airport', 'port'] else 12
+                    })
 
-        # Draw roads
+        # Draw city blocks with subtle fill
+        for block in self.blocks:
+            if 'polygon' in block and block['polygon'] is not None and block['polygon'].is_valid:
+                coords = list(block['polygon'].exterior.coords)
+                ax.fill(coords[:, 0], coords[:, 1], color='#DDDDDD', alpha=0.2, zorder=3)
+
+        # Draw roads with clear hierarchy based on type
+        # First draw the outlines for all roads (black base)
         for road in self.roads:
             points = np.array(road['points'])
-            color = self.road_styles.get(road['type'], {}).get('color', '#444')
-            ax.plot(points[:, 0], points[:, 1], color=color, linewidth=road['width'] / 1.5, alpha=0.9, solid_capstyle='round')
+            width = road.get('width', 5)
+            road_type = road.get('type', 'local')
+            
+            # Draw thicker black outline for all roads
+            ax.plot(points[:, 0], points[:, 1], color='#000000', 
+                   linewidth=width+2, solid_capstyle='round', 
+                   alpha=0.7, zorder=4)
+        
+        # Then draw the colored road surfaces
+        for road in self.roads:
+            points = np.array(road['points'])
+            width = road.get('width', 5)
+            road_type = road.get('type', 'local')
+            
+            if road_type == 'highway':
+                # Highways - yellow center line
+                ax.plot(points[:, 0], points[:, 1], color='#F0F0F0', 
+                       linewidth=width, solid_capstyle='round', 
+                       alpha=0.9, zorder=5)
+                ax.plot(points[:, 0], points[:, 1], color='#FFDD00', 
+                       linewidth=width*0.3, solid_capstyle='round', 
+                       alpha=0.9, zorder=6)
+            elif road_type == 'arterial':
+                # Arterial - wider white roads
+                ax.plot(points[:, 0], points[:, 1], color='#FFFFFF', 
+                       linewidth=width, solid_capstyle='round', 
+                       alpha=0.9, zorder=5)
+            elif road_type == 'collector':
+                # Collector roads - light gray
+                ax.plot(points[:, 0], points[:, 1], color='#E0E0E0', 
+                       linewidth=width, solid_capstyle='round', 
+                       alpha=0.8, zorder=5)
+            else:  # local roads
+                ax.plot(points[:, 0], points[:, 1], color='#D0D0D0', 
+                       linewidth=width, solid_capstyle='round', 
+                       alpha=0.7, zorder=5)
 
-        # Draw bridges
+        # Draw bridges with elevated appearance
         for bridge in self.bridges:
             points = np.array(bridge['points'])
-            # Draw bridge casing
-            ax.plot(points[:, 0], points[:, 1], color='#666', linewidth=bridge['width'] / 1.5 + 2, alpha=0.7, solid_capstyle='round')
-            # Draw bridge surface
-            ax.plot(points[:, 0], points[:, 1], color='#bbbbbb', linewidth=bridge['width'] / 1.5, alpha=0.9, solid_capstyle='round')
+            width = bridge.get('width', 8)
+            # Shadow/structure
+            ax.plot(points[:, 0], points[:, 1], color='#404040', 
+                   linewidth=width+4, solid_capstyle='round', 
+                   alpha=0.7, zorder=6)
+            # Road surface
+            ax.plot(points[:, 0], points[:, 1], color='#909090', 
+                   linewidth=width, solid_capstyle='round', 
+                   alpha=0.9, zorder=7)
+            # Center line
+            ax.plot(points[:, 0], points[:, 1], color='#FFFF00', 
+                   linewidth=width*0.2, solid_capstyle='round', 
+                   alpha=0.7, zorder=8, linestyle=(0, (5, 10)))
 
-        # Draw city blocks
-        block_patches = []
-        for block in self.blocks:
-            poly = block['polygon']
-            if poly.is_valid and not poly.is_empty:
-                # Use matplotlib's Polygon patch directly, which is more robust
-                patch = MatplotlibPolygon(list(poly.exterior.coords))
-                block_patches.append(patch)
-
-        ax.add_collection(PatchCollection(
-            block_patches, 
-            facecolor=[self.district_colors.get(b['type'], '#cccccc') for b in self.blocks],
-            edgecolor='black',
-            alpha=0.4,
-            zorder=1
-        ))
-
-        # Draw buildings
+        # Draw buildings with 3D-like appearance
         for building in self.buildings:
-            rect = Rectangle((building['x'], building['y']), building['width'], building['length'], color='#888', alpha=0.8)
-            ax.add_patch(rect)
+            # Buildings are stored as rectangles with x, y, width, length
+            if 'x' in building and 'y' in building and 'width' in building and 'length' in building:
+                x = building['x']
+                y = building['y']
+                width = building['width']
+                length = building['length']
+                
+                # Create rectangle points
+                rect_points = np.array([
+                    [x, y],
+                    [x + width, y],
+                    [x + width, y + length],
+                    [x, y + length]
+                ])
+                
+                building_type = building.get('type', 'generic')
+                district_type = building.get('district_type', 'residential')
+                
+                # Color buildings by their district type for visual coherence
+                if district_type == 'downtown':
+                    color = '#A0A0A0'  # Gray for downtown skyscrapers
+                elif district_type == 'commercial':
+                    color = '#C0C0C0'  # Light gray for commercial buildings
+                elif district_type == 'industrial':
+                    color = '#909090'  # Dark gray for industrial
+                elif district_type == 'airport':
+                    color = '#B0B0B0'  # Medium gray for airport buildings
+                else:
+                    color = '#D0D0D0'  # Light gray for other buildings
+                
+                # Add shadow effect for buildings
+                shadow_offset = 2  # Pixels to offset shadow
+                shadow_points = rect_points + np.array([shadow_offset, -shadow_offset])
+                ax.fill(shadow_points[:, 0], shadow_points[:, 1], color='black', alpha=0.2, zorder=9)
+                
+                # Draw building
+                ax.fill(rect_points[:, 0], rect_points[:, 1], color=color, alpha=0.9, zorder=10)
 
-        # Add legend for districts
-        legend_elements = [Patch(facecolor=color, edgecolor='gray', label=dtype.replace('_', ' ').title()) for dtype, color in self.district_colors.items()]
-        ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.25, 1.0))
+        # Draw district labels with better typography
+        for label in district_labels:
+            ax.text(label['pos'][0], label['pos'][1], label['text'], 
+                    fontsize=label['size'], ha='center', va='center', 
+                    color=label['color'], weight='bold', zorder=11,
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
 
+        # Set map limits
         ax.set_xlim(0, self.width)
         ax.set_ylim(0, self.height)
-        ax.set_aspect('equal')
-        plt.tight_layout()
+        
+        # Add title and remove axes
+        ax.set_title("GTA-Style Procedural Map", fontsize=20, pad=20, fontweight='bold')
+        ax.axis('off')
+        
+        # Add legend with clearer organization and grouping
+        district_elements = [
+            Patch(facecolor=district_colors['downtown'], alpha=0.5, edgecolor='#555555', label='Downtown'),
+            Patch(facecolor=district_colors['commercial'], alpha=0.5, edgecolor='#555555', label='Commercial'),
+            Patch(facecolor=district_colors['residential'], alpha=0.5, edgecolor='#555555', label='Residential'),
+            Patch(facecolor=district_colors['industrial'], alpha=0.5, edgecolor='#555555', label='Industrial'),
+            Patch(facecolor=district_colors['suburban'], alpha=0.5, edgecolor='#555555', label='Suburban')
+        ]
+        
+        special_district_elements = [
+            Patch(facecolor=district_colors['beach'], alpha=0.5, edgecolor='#555555', label='Beach'),
+            Patch(facecolor=district_colors['airport'], alpha=0.5, edgecolor='#555555', label='Airport'),
+            Patch(facecolor=district_colors['hills'], alpha=0.5, edgecolor='#555555', label='Hills'),
+            Patch(facecolor=district_colors['port'], alpha=0.5, edgecolor='#555555', label='Port'),
+            Patch(facecolor=district_colors['park'], alpha=0.5, edgecolor='#555555', label='Park')
+        ]
+        
+        road_elements = [
+            Line2D([0], [0], color='#000000', linewidth=4, label='Road Outline'),
+            Line2D([0], [0], color='#FFDD00', linewidth=2, label='Highway'),
+            Line2D([0], [0], color='#FFFFFF', linewidth=2, label='Arterial'),
+            Line2D([0], [0], color='#E0E0E0', linewidth=2, label='Collector'),
+            Line2D([0], [0], color='#909090', linewidth=2, label='Bridge')
+        ]
+        
+        nature_elements = [
+            Patch(facecolor='#4682B4', alpha=0.7, label='Water'),
+            # Use a gradient patch for terrain
+            Patch(facecolor='#74C476', alpha=0.6, label='Lower Elevation'),
+            Patch(facecolor='#6B8E23', alpha=0.6, label='Higher Elevation')
+        ]
+        
+        # Create four separate legends for different categories
+        # Urban Districts
+        ax.legend(handles=district_elements, loc='upper left', 
+                 title='Urban Districts', framealpha=0.9, title_fontsize=12)
+        
+        # Special Districts - positioned below urban districts
+        special_legend = ax.legend(handles=special_district_elements, loc='upper left', 
+                                  title='Special Areas', framealpha=0.9, title_fontsize=12,
+                                  bbox_to_anchor=(0.0, 0.75))
+        ax.add_artist(special_legend)
+        
+        # Roads - positioned on right side
+        road_legend = ax.legend(handles=road_elements, loc='upper right', 
+                               title='Transportation', framealpha=0.9, title_fontsize=12)
+        ax.add_artist(road_legend)
+        
+        # Natural features - positioned below roads
+        nature_legend = ax.legend(handles=nature_elements, loc='upper right', 
+                                 title='Natural Features', framealpha=0.9, title_fontsize=12,
+                                 bbox_to_anchor=(1.0, 0.75))
+        ax.add_artist(nature_legend)
+        
         if save_path:
             plt.savefig(save_path, dpi=300)
         plt.show()
