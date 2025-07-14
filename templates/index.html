@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GTA Map Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            min-height: 600px;
+        }
+
+        .controls {
+            background: #f8f9fa;
+            padding: 30px;
+            border-right: 1px solid #e9ecef;
+        }
+
+        .control-group {
+            margin-bottom: 25px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .control-group input, .control-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .control-group input:focus, .control-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .generate-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .generate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .generate-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .map-display {
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #f8f9fa;
+        }
+
+        .map-placeholder {
+            width: 100%;
+            max-width: 800px;
+            height: 600px;
+            border: 3px dashed #dee2e6;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 1.2em;
+            background: white;
+        }
+
+        .map-image {
+            max-width: 100%;
+            max-height: 600px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .stats {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .stats h3 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .download-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .download-btn {
+            padding: 10px 20px;
+            background: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #f5c6cb;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                border-right: none;
+                border-bottom: 1px solid #e9ecef;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏙️ GTA Map Generator</h1>
+            <p>Generate procedural city maps inspired by Grand Theft Auto</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="width">Map Width:</label>
+                    <input type="number" id="width" value="2000" min="500" max="5000" step="100">
+                </div>
+                
+                <div class="control-group">
+                    <label for="height">Map Height:</label>
+                    <input type="number" id="height" value="2000" min="500" max="5000" step="100">
+                </div>
+                
+                <div class="control-group">
+                    <label for="seed">Seed (optional):</label>
+                    <input type="number" id="seed" placeholder="Leave empty for random">
+                </div>
+                
+                <button class="generate-btn" onclick="generateMap()">
+                    🎲 Generate Map
+                </button>
+                
+                <div class="control-group" style="margin-top: 30px;">
+                    <label>Quick Presets:</label>
+                    <button class="generate-btn" style="margin-bottom: 10px; font-size: 14px;" onclick="loadPreset('small')">
+                        Small City (1000x1000)
+                    </button>
+                    <button class="generate-btn" style="margin-bottom: 10px; font-size: 14px;" onclick="loadPreset('large')">
+                        Large City (3000x3000)
+                    </button>
+                    <button class="generate-btn" style="font-size: 14px;" onclick="loadPreset('random')">
+                        Random Seed
+                    </button>
+                </div>
+            </div>
+            
+            <div class="map-display">
+                <div id="map-placeholder" class="map-placeholder">
+                    <div>
+                        <h3>🗺️ Your Generated Map Will Appear Here</h3>
+                        <p>Click "Generate Map" to create a new procedural city</p>
+                    </div>
+                </div>
+                
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <p>Generating your GTA-style map...</p>
+                    <p><small>This may take a few moments</small></p>
+                </div>
+                
+                <div id="error" class="error" style="display: none;"></div>
+                
+                <div id="stats" class="stats" style="display: none;">
+                    <h3>📊 Map Statistics</h3>
+                    <div id="stats-content" class="stats-grid"></div>
+                    
+                    <div class="download-buttons">
+                        <a href="#" id="download-png" class="download-btn">📷 Download PNG</a>
+                        <a href="#" id="download-json" class="download-btn">📄 Download JSON</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentMapData = null;
+
+        function loadPreset(preset) {
+            const widthInput = document.getElementById('width');
+            const heightInput = document.getElementById('height');
+            const seedInput = document.getElementById('seed');
+            
+            switch(preset) {
+                case 'small':
+                    widthInput.value = 1000;
+                    heightInput.value = 1000;
+                    seedInput.value = '';
+                    break;
+                case 'large':
+                    widthInput.value = 3000;
+                    heightInput.value = 3000;
+                    seedInput.value = '';
+                    break;
+                case 'random':
+                    seedInput.value = Math.floor(Math.random() * 10000);
+                    break;
+            }
+        }
+
+        async function generateMap() {
+            const width = parseInt(document.getElementById('width').value);
+            const height = parseInt(document.getElementById('height').value);
+            const seed = document.getElementById('seed').value ? parseInt(document.getElementById('seed').value) : null;
+            
+            // Show loading, hide other elements
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('map-placeholder').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            document.querySelector('.generate-btn').disabled = true;
+            
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        width: width,
+                        height: height,
+                        seed: seed
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Display the generated map
+                    const mapContainer = document.getElementById('map-placeholder');
+                    mapContainer.innerHTML = `<img src="data:image/png;base64,${data.image}" class="map-image" alt="Generated GTA Map">`;
+                    mapContainer.style.display = 'flex';
+                    
+                    // Display statistics
+                    displayStats(data.stats);
+                    
+                    // Store map data for downloads
+                    currentMapData = data.map_data;
+                    
+                    // Update download links
+                    document.getElementById('download-png').href = `/download/png`;
+                    document.getElementById('download-json').href = `/download/json`;
+                    
+                } else {
+                    throw new Error(data.error || 'Unknown error occurred');
+                }
+                
+            } catch (error) {
+                console.error('Error generating map:', error);
+                document.getElementById('error').textContent = `Error: ${error.message}`;
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('map-placeholder').style.display = 'flex';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.querySelector('.generate-btn').disabled = false;
+            }
+        }
+
+        function displayStats(stats) {
+            const statsContent = document.getElementById('stats-content');
+            statsContent.innerHTML = '';
+            
+            const statItems = [
+                { label: 'Seed', value: stats.seed },
+                { label: 'Dimensions', value: stats.dimensions },
+                { label: 'Districts', value: stats.districts },
+                { label: 'Roads', value: stats.roads },
+                { label: 'Buildings', value: stats.buildings },
+                { label: 'Landmarks', value: stats.landmarks },
+                { label: 'Parks', value: stats.parks },
+                { label: 'Water Bodies', value: stats.water_bodies }
+            ];
+            
+            statItems.forEach(item => {
+                const statDiv = document.createElement('div');
+                statDiv.className = 'stat-item';
+                statDiv.innerHTML = `
+                    <div class="stat-value">${item.value}</div>
+                    <div class="stat-label">${item.label}</div>
+                `;
+                statsContent.appendChild(statDiv);
+            });
+            
+            document.getElementById('stats').style.display = 'block';
+        }
+
+        // Generate a map on page load with default settings
+        window.addEventListener('load', function() {
+            // Optional: Auto-generate a sample map
+            // generateMap();
+        });
+    </script>
+</body>
+</html>
