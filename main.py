@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from src.core.map_generator import MapGeneratorFactory
 from src.config.settings import MapConfig, create_preset_config
 from src.web.app import create_app
-from src.core.map_data import MapDataJSONEncoder
+from src.core.map_data import NumpyJSONEncoder
 import json
 
 
@@ -49,7 +49,7 @@ def generate_map(config=None, preset_name=None, output_dir="output"):
     # Save JSON data
     json_path = os.path.join(output_dir, f"{base_name}.json")
     with open(json_path, 'w') as f:
-        json.dump(map_data.to_dict(), f, indent=2, cls=MapDataJSONEncoder)
+        json.dump(map_data.to_dict(), f, indent=2, cls=NumpyJSONEncoder)
     
     # Save PNG image
     png_path = os.path.join(output_dir, f"{base_name}.png")

@@ -16,12 +16,17 @@ class MapGeneratorWebApp:
     """Web application for the GTA Map Generator."""
     
     def __init__(self):
-        self.app = Flask(__name__)
+        # Get the project root directory (two levels up from this file)
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        template_dir = os.path.join(project_root, 'templates')
+        static_dir = os.path.join(project_root, 'static')
+        
+        self.app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
         self.renderer = MapRenderer()
         self._setup_routes()
         
         # Create static directory
-        os.makedirs('static', exist_ok=True)
+        os.makedirs(static_dir, exist_ok=True)
     
     def _setup_routes(self):
         """Setup Flask routes."""
@@ -61,7 +66,7 @@ class MapGeneratorWebApp:
             }
             return jsonify(presets)
         
-        @self.app.route('/api/generate', methods=['POST'])
+        @self.app.route('/generate', methods=['POST'])
         def generate_map():
             """Generate a new map with specified parameters."""
             try:
