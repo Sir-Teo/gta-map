@@ -106,21 +106,21 @@ if __name__ == "__main__":
         'width': 3500,
         'height': 3500,
         'districts': DistrictConfig(**{
-            'district_count': 16,  # More districts for urban complexity
-            'minimum_district_distance': 350.0,  # Allow more overlap
+            'district_count': 16,
+            'minimum_district_distance': 350.0,
         }),
         'transportation': TransportationConfig(**{
-            'arterial_spacing': 1600,  # More organic, less grid
-            'collector_spacing': 1000,  # More organic, less grid
-            'local_road_density': 0.28,  # Much more local roads
-            'road_curve_factor': 1.7,  # Stronger curves for natural look
+            'arterial_spacing': 1100,  # Denser arterials
+            'collector_spacing': 600,  # Denser collectors
+            'local_road_density': 0.45,  # Much more local roads
+            'road_curve_factor': 1.7,
             'enable_bridges': True,
             'enable_tunnels': True,
             'enable_railways': True,
         }),
         'buildings': BuildingConfig(**{
             'density_map': {
-                'downtown': 0.0015,  # Denser city center
+                'downtown': 0.0015,
                 'commercial': 0.0011,
                 'residential': 0.0007,
                 'industrial': 0.0004,
@@ -128,12 +128,12 @@ if __name__ == "__main__":
             }
         }),
         'water': WaterConfig(**{
-            'river_count_range': (4, 7),  # More rivers
-            'lake_count_range': (6, 12),   # More lakes
+            'river_count_range': (4, 7),
+            'lake_count_range': (6, 12),
             'river_width_range': (50.0, 100.0),
-            'coastal_features': True,     # Enable coastlines
+            'coastal_features': True,
         }),
-        'seed': 98765,  # New seed for variety
+        'seed': 98765,
         'enable_multi_city': True,
     }
 

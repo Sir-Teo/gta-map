@@ -295,417 +295,60 @@ class AdvancedTransportationGenerator:
         # Create secondary arterials that branch off main ones (reduced)
         self._create_secondary_arterials(map_data, config)
         
+        # --- NEW: Realistic, natural connections ---
+        self._connect_settlements_realistically(map_data, config)
+        
         print(f"  → Generated {arterial_count} organic arterial roads")
     
-    def _create_organic_arterial_road(self, map_data: MapData, start: Tuple[float, float], 
-                                     end: Tuple[float, float], road_id: str, config: TransportationConfig) -> Optional[Road]:
-        """Create an organic arterial road that follows terrain and natural features."""
-        
-        # Generate path using organic routing
-        path_points = self._create_organic_path(map_data, start, end, 'arterial')
-        
-        if len(path_points) < 2:
-            return None
-        
-        # Apply natural curvature and smoothing
-        smoothed_points = self._apply_organic_smoothing(path_points, 'arterial')
-        
-        # Create the road
-        road = Road(
-            id=road_id,
-            road_type='arterial',
-            points=smoothed_points,
-            width=config.road_styles['arterial']['width'],
-            color=config.road_styles['arterial']['color']
-        )
-        
-        return road
-    
-    def _create_organic_path(self, map_data: MapData, start: Tuple[float, float], 
-                           end: Tuple[float, float], road_type: str) -> List[Tuple[float, float]]:
-        """Create an organic path that follows terrain and natural features."""
-        
-        # Use A* pathfinding with terrain awareness
-        path = self._organic_astar_pathfinding(map_data, start, end, road_type)
-        
-        if not path:
-            # Fallback to direct path with terrain avoidance
-            path = self._create_direct_terrain_aware_path(map_data, start, end, road_type)
-        
-        return path
-    
-    def _organic_astar_pathfinding(self, map_data: MapData, start: Tuple[float, float], 
-                                  end: Tuple[float, float], road_type: str) -> List[Tuple[float, float]]:
-        """A* pathfinding that considers terrain, water, and natural features."""
-        
-        # Convert to grid coordinates
-        start_grid = (int(start[0] / map_data.grid_size), int(start[1] / map_data.grid_size))
-        end_grid = (int(end[0] / map_data.grid_size), int(end[1] / map_data.grid_size))
-        
-        # A* implementation with terrain cost
-        open_set = {start_grid}
-        came_from = {}
-        g_score = {start_grid: 0}
-        f_score = {start_grid: self._heuristic(start_grid, end_grid)}
-        
-        while open_set:
-            current = min(open_set, key=lambda x: f_score.get(x, float('inf')))
-            
-            if current == end_grid:
-                # Reconstruct path
-                path = []
-                while current in came_from:
-                    path.append(current)
-                    current = came_from[current]
-                path.append(start_grid)
-                path.reverse()
-                
-                # Convert back to map coordinates and add intermediate points
-                return self._convert_grid_path_to_map_path(path, map_data)
-            
-            open_set.remove(current)
-            
-            # Check neighbors
-            for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
-                neighbor = (current[0] + dx, current[1] + dy)
-                
-                if (0 <= neighbor[0] < map_data.grid_width and 
-                    0 <= neighbor[1] < map_data.grid_height):
-                    
-                    # Calculate movement cost based on terrain
-                    terrain_cost = self._calculate_terrain_cost(map_data, neighbor, road_type)
-                    
-                    if terrain_cost < float('inf'):  # Valid move
-                        tentative_g_score = g_score[current] + terrain_cost
-                        
-                        if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
-                            came_from[neighbor] = current
-                            g_score[neighbor] = tentative_g_score
-                            f_score[neighbor] = tentative_g_score + self._heuristic(neighbor, end_grid)
-                            open_set.add(neighbor)
-        
-        return []  # No path found
-    
-    def _calculate_terrain_cost(self, map_data: MapData, grid_pos: Tuple[int, int], road_type: str) -> float:
-        """Calculate movement cost based on terrain type and elevation."""
-        x, y = grid_pos
-        
-        if not map_data.land_mask[y, x]:
-            return float('inf')  # Can't build on water
-        
-        elevation = map_data.heightmap[y, x]
-        base_cost = 1.0
-        
-        # Elevation penalties
-        if elevation > 0.7:  # Mountains
-            base_cost *= 5.0
-        elif elevation > 0.6:  # Hills
-            base_cost *= 2.0
-        elif elevation < 0.4:  # Low areas (flood risk)
-            base_cost *= 1.5
-        
-        # Road type adjustments
-        if road_type == 'highway':
-            base_cost *= 0.8  # Highways can handle more difficult terrain
-        elif road_type == 'local':
-            base_cost *= 1.2  # Local roads prefer easier terrain
-        
-        return base_cost
-    
-    def _heuristic(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
-        """Heuristic function for A* (Manhattan distance)."""
-        return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
-    
-    def _convert_grid_path_to_map_path(self, grid_path: List[Tuple[int, int]], map_data: MapData) -> List[Tuple[float, float]]:
-        """Convert grid path to map coordinates with intermediate points."""
-        map_path = []
-        
-        for i, grid_pos in enumerate(grid_path):
-            map_x = grid_pos[0] * map_data.grid_size + map_data.grid_size / 2
-            map_y = grid_pos[1] * map_data.grid_size + map_data.grid_size / 2
-            map_path.append((map_x, map_y))
-            
-            # Add intermediate points for smoother curves
-            if i < len(grid_path) - 1:
-                next_grid = grid_path[i + 1]
-                # Add a point between current and next for smoother curves
-                mid_x = (grid_pos[0] + next_grid[0]) / 2 * map_data.grid_size + map_data.grid_size / 2
-                mid_y = (grid_pos[1] + next_grid[1]) / 2 * map_data.grid_size + map_data.grid_size / 2
-                map_path.append((mid_x, mid_y))
-        
-        return map_path
-    
-    def _create_direct_terrain_aware_path(self, map_data: MapData, start: Tuple[float, float], 
-                                        end: Tuple[float, float], road_type: str) -> List[Tuple[float, float]]:
-        """Create a direct path that avoids major obstacles."""
-        path = [start]
-        
-        # Create intermediate points that avoid water and difficult terrain
-        num_points = max(3, int(self._distance(start, end) / 100))
-        
-        for i in range(1, num_points):
-            t = i / num_points
-            point = self._lerp(start, end, t)
-            
-            # Adjust point to avoid obstacles
-            adjusted_point = self._avoid_obstacles(map_data, point, road_type)
-            path.append(adjusted_point)
-        
-        path.append(end)
-        return path
-    
-    def _apply_organic_smoothing(self, points: List[Tuple[float, float]], road_type: str) -> List[Tuple[float, float]]:
-        """Apply organic smoothing to road points."""
-        if len(points) < 3:
-            return points
-        
-        smoothed = [points[0]]
-        
-        for i in range(1, len(points) - 1):
-            prev = points[i - 1]
-            curr = points[i]
-            next_point = points[i + 1]
-            
-            # Calculate smoothed point using weighted average with more weight on neighbors
-            weight = 0.4 if road_type == 'arterial' else 0.6  # Increased from 0.3/0.5 to 0.4/0.6
-            smoothed_x = curr[0] * (1 - weight) + (prev[0] + next_point[0]) / 2 * weight
-            smoothed_y = curr[1] * (1 - weight) + (prev[1] + next_point[1]) / 2 * weight
-            
-            smoothed.append((smoothed_x, smoothed_y))
-        
-        smoothed.append(points[-1])
-        return smoothed
-    
-    def _create_secondary_arterials(self, map_data: MapData, config: TransportationConfig):
-        """Create secondary arterial roads that branch off main arterials."""
-        if not self.arterial_spine:
-            return
-        
-        secondary_count = 0
-        max_secondary = min(3, len(self.arterial_spine))  # Reduced from 6 to 3
-        
-        for arterial in self.arterial_spine:
-            if secondary_count >= max_secondary:
-                break
-            
-            # Find good branching points along the arterial
-            branch_points = self._find_branching_points(arterial, map_data)
-            
-            for branch_point in branch_points:
-                if secondary_count >= max_secondary:
-                    break
-                
-                # Find destination for secondary arterial
-                destination = self._find_secondary_destination(map_data, branch_point)
-                
-                if destination:
-                    secondary_road = self._create_organic_arterial_road(
-                        map_data, branch_point, destination, f"secondary_arterial_{secondary_count}", config
+    def _connect_settlements_realistically(self, map_data: MapData, config: TransportationConfig):
+        """Connect settlements in a realistic, natural way."""
+        from shapely.geometry import Point
+        # Gather settlements by type
+        cities_towns = []
+        villages = []
+        for district in map_data.districts.values():
+            if district.district_type in ['major_city', 'city', 'town', 'downtown', 'commercial', 'industrial', 'port', 'airport']:
+                cities_towns.append((district.id, district.center))
+            elif district.district_type in ['village', 'residential', 'suburban']:
+                villages.append((district.id, district.center))
+        # Connect each city/town to 1–2 nearest other cities/towns (if within 1500 units)
+        for i, (id1, center1) in enumerate(cities_towns):
+            dists = []
+            for j, (id2, center2) in enumerate(cities_towns):
+                if i != j:
+                    dist = ((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2) ** 0.5
+                    dists.append((dist, id2, center2))
+            dists = [d for d in dists if d[0] < 1500]
+            dists.sort()
+            for _, id2, center2 in dists[:2]:
+                if id1 < id2:
+                    road_id = f"realistic_link_{id1}_{id2}"
+                    road = self._create_organic_arterial_road(
+                        map_data, center1, center2, road_id, config
                     )
-                    
-                    if secondary_road:
-                        map_data.add_road(secondary_road)
-                        secondary_count += 1
-    
-    def _find_branching_points(self, arterial: Road, map_data: MapData) -> List[Tuple[float, float]]:
-        """Find good points along an arterial for branching secondary roads."""
-        if not arterial.points or len(arterial.points) < 3:
-            return []
-        
-        branch_points = []
-        
-        # Sample points along the arterial with more spacing
-        for i in range(2, len(arterial.points) - 2, 5):  # Increased spacing from 3 to 5
-            point = arterial.points[i]
-            
-            # Check if this is a good branching location
-            if self._is_good_branching_location(map_data, point):
-                branch_points.append(point)
-        
-        return branch_points[:2]  # Reduced from 3 to 2 branches per arterial
-    
-    def _is_good_branching_location(self, map_data: MapData, point: Tuple[float, float]) -> bool:
-        """Check if a point is suitable for branching a secondary road."""
-        grid_x = int(point[0] / map_data.grid_size)
-        grid_y = int(point[1] / map_data.grid_size)
-        
-        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
-            return False
-        
-        # Check if area is suitable (not too close to water, good elevation)
-        elevation = map_data.heightmap[grid_y, grid_x]
-        if elevation < 0.4 or elevation > 0.7:
-            return False
-        
-        # Check if not too close to existing roads (increased distance)
-        for road in map_data.roads.values():
-            if road.points:
-                min_dist = min(self._distance(point, road_point) for road_point in road.points)
-                if min_dist < 100:  # Increased from 50 to 100
-                    return False
-        
-        return True
-    
-    def _find_secondary_destination(self, map_data: MapData, start_point: Tuple[float, float]) -> Optional[Tuple[float, float]]:
-        """Find a good destination for a secondary arterial."""
-        # Look for districts or settlements that need connection
-        best_destination = None
-        best_score = 0
-        
-        for district in map_data.districts.values():
-            if district.center:
-                distance = self._distance(start_point, district.center)
-                if 100 < distance < 800:  # Reasonable distance for secondary arterial
-                    score = self._calculate_destination_score(map_data, district.center)
-                    if score > best_score:
-                        best_score = score
-                        best_destination = district.center
-        
-        return best_destination
-    
-    def _calculate_destination_score(self, map_data: MapData, point: Tuple[float, float]) -> float:
-        """Calculate how good a destination is for a secondary arterial."""
-        score = 0
-        
-        # Prefer commercial and industrial districts
-        grid_x = int(point[0] / map_data.grid_size)
-        grid_y = int(point[1] / map_data.grid_size)
-        
-        if (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
-            # Check if point is in a good district type
-            for district in map_data.districts.values():
-                if district.polygon and district.polygon.contains(Point(point[0], point[1])):
-                    if district.district_type in ['commercial', 'industrial', 'downtown']:
-                        score += 2.0
-                    elif district.district_type in ['residential', 'suburban']:
-                        score += 1.0
-        
-        return score
-    
-    def _distance(self, point1: Tuple[float, float], point2: Tuple[float, float]) -> float:
-        """Calculate Euclidean distance between two points."""
-        return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
-    
-    def _lerp(self, start: Tuple[float, float], end: Tuple[float, float], t: float) -> Tuple[float, float]:
-        """Linear interpolation between two points."""
-        return (start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t)
-    
-    def _find_natural_arterial_starts(self, map_data: MapData) -> List[Tuple[float, float]]:
-        """Find natural starting points for arterial roads."""
-        starts = []
-        
-        # Add major district centers
-        major_districts = [d for d in map_data.districts.values() 
-                          if d.district_type in ['downtown', 'commercial'] and d.center]
-        for district in major_districts:
-            starts.append(district.center)
-        
-        # Add water access points (ports, beaches)
-        for district in map_data.districts.values():
-            if district.district_type in ['port', 'beach'] and district.center:
-                starts.append(district.center)
-        
-        # Add map edge access points
-        edge_points = [
-            (map_data.width * 0.2, map_data.height * 0.1),
-            (map_data.width * 0.8, map_data.height * 0.1),
-            (map_data.width * 0.2, map_data.height * 0.9),
-            (map_data.width * 0.8, map_data.height * 0.9),
-        ]
-        
-        # Filter to land areas
-        for point in edge_points:
-            grid_x = int(point[0] / map_data.grid_size)
-            grid_y = int(point[1] / map_data.grid_size)
-            
-            if (0 <= grid_x < map_data.grid_width and 
-                0 <= grid_y < map_data.grid_height and
-                map_data.land_mask[grid_y, grid_x]):
-                starts.append(point)
-        
-        # Remove duplicates and limit
-        unique_starts = []
-        for start in starts:
-            if not any(self._distance(start, existing) < 200 for existing in unique_starts):
-                unique_starts.append(start)
-        
-        return unique_starts[:8]  # Limit to 8 starting points
-    
-    def _find_natural_arterial_end(self, map_data: MapData, start: Tuple[float, float]) -> Optional[Tuple[float, float]]:
-        """Find a good destination for an arterial road."""
-        best_end = None
-        best_score = 0
-        
-        # Look for districts that need connection
-        for district in map_data.districts.values():
-            if district.center:
-                distance = self._distance(start, district.center)
-                if 200 < distance < 1000:  # Reasonable distance
-                    score = self._calculate_destination_score(map_data, district.center)
-                    if score > best_score:
-                        best_score = score
-                        best_end = district.center
-        
-        # If no good district found, create a natural endpoint
-        if not best_end:
-            # Create endpoint on opposite side of map
-            if start[0] < map_data.width / 2:
-                end_x = map_data.width * 0.8
-            else:
-                end_x = map_data.width * 0.2
-            
-            if start[1] < map_data.height / 2:
-                end_y = map_data.height * 0.8
-            else:
-                end_y = map_data.height * 0.2
-            
-            best_end = (end_x, end_y)
-        
-        return best_end
-    
-    def _avoid_obstacles(self, map_data: MapData, point: Tuple[float, float], road_type: str) -> Tuple[float, float]:
-        """Adjust point to avoid water bodies and other obstacles."""
-        x, y = point
-        avoidance_radius = 80 if road_type in ['highway', 'arterial'] else 50
-        
-        # Check for water bodies
-        for water_body in map_data.water_bodies.values():
-            if hasattr(water_body, 'geometry') and water_body.geometry:
-                distance = water_body.geometry.distance(Point(x, y))
-                
-                if distance < avoidance_radius:
-                    # Calculate avoidance vector
-                    if water_body.geometry.contains(Point(x, y)):
-                        # Point is inside water - find nearest edge and move out
-                        boundary = water_body.geometry.boundary
-                        nearest_point = boundary.interpolate(boundary.project(Point(x, y)))
-                        
-                        # Move away from water
-                        avoid_x = x + (x - nearest_point.x) * 2
-                        avoid_y = y + (y - nearest_point.y) * 2
-                    else:
-                        # Point is near water - adjust to maintain distance
-                        centroid = water_body.geometry.centroid
-                        dx = x - centroid.x
-                        dy = y - centroid.y
-                        length = math.sqrt(dx**2 + dy**2)
-                        
-                        if length > 0:
-                            # Move away from water center
-                            avoid_x = x + (dx / length) * (avoidance_radius - distance)
-                            avoid_y = y + (dy / length) * (avoidance_radius - distance)
-                        else:
-                            avoid_x, avoid_y = x, y
-                    
-                    # Ensure within map bounds
-                    x = max(50, min(map_data.width - 50, avoid_x))
-                    y = max(50, min(map_data.height - 50, avoid_y))
-        
-        return (x, y)
+                    if road:
+                        map_data.add_road(road)
+        # Connect each village to the nearest city/town by collector
+        for id1, center1 in villages:
+            best = None
+            best_dist = float('inf')
+            for id2, center2 in cities_towns:
+                dist = ((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2) ** 0.5
+                if dist < best_dist:
+                    best = (id2, center2)
+                    best_dist = dist
+            if best and best_dist < 2000:
+                id2, center2 = best
+                road_id = f"realistic_collector_{id1}_{id2}"
+                road = self._create_organic_arterial_road(
+                    map_data, center1, center2, road_id, config
+                )
+                if road:
+                    road.road_type = 'collector'
+                    map_data.add_road(road)
     
     def _generate_collector_roads(self, map_data: MapData, config: TransportationConfig):
         """Generate collector roads that connect arterials with proper hierarchy."""
-        
         print("    → Building collector road network...")
         
         # Get all arterial roads
@@ -716,7 +359,7 @@ class AdvancedTransportationGenerator:
         
         # Create collector roads with much better spacing
         collector_count = 0
-        max_collectors = 3  # Reduced significantly
+        max_collectors = 10  # Allow up to 10 collectors
         
         # Create collectors between arterials with proper spacing
         for i, arterial1 in enumerate(arterials):
@@ -731,7 +374,7 @@ class AdvancedTransportationGenerator:
                 # Check distance between arterials
                 distance = self._calculate_arterial_distance(arterial1, arterial2)
                 
-                if 400 < distance < 800 and distance > best_distance:  # Much better spacing
+                if 250 < distance < 1500 and distance > best_distance:  # Allow more connections, wider range
                     best_distance = distance
                     best_arterial = arterial2
             
@@ -739,7 +382,7 @@ class AdvancedTransportationGenerator:
                 # Create collector between these arterials
                 connections = self._find_arterial_connection_points(arterial1, best_arterial)
                 
-                for start_point, end_point in connections[:1]:  # Only one connection
+                for start_point, end_point in connections[:3]:  # Allow up to 3 connections
                     collector_path = self._create_organic_path(map_data, start_point, end_point, 'collector')
                     
                     if collector_path and len(collector_path) > 2:
@@ -2188,8 +1831,8 @@ class AdvancedTransportationGenerator:
         import math
         
         connections = []
-        min_distance = 400  # Much better spacing
-        max_distance = 800
+        min_distance = 200  # Allow closer connections
+        max_distance = 2000  # Allow farther connections
         
         # Sample points along arterials
         sample_points1 = self._sample_road_points(arterial1, 3)
@@ -2202,9 +1845,9 @@ class AdvancedTransportationGenerator:
                 if min_distance <= distance <= max_distance:
                     connections.append((point1, point2))
         
-        # Sort by distance and return only the best connection
+        # Sort by distance and return only the best connections
         connections.sort(key=lambda x: math.sqrt((x[1][0] - x[0][0])**2 + (x[1][1] - x[0][1])**2))
-        return connections[:1]  # Return only 1 connection
+        return connections[:3]  # Return up to 3 connections
     
     def _sample_road_points(self, road, num_samples: int) -> List[Tuple[float, float]]:
         """Sample evenly spaced points along a road."""
@@ -2370,6 +2013,297 @@ class AdvancedTransportationGenerator:
             points.append(points[0])
         
         return self._apply_organic_smoothing(points, 'local')
+    
+    def _find_natural_arterial_starts(self, map_data: MapData) -> list:
+        """Find natural starting points for arterial roads."""
+        starts = []
+        # Add major district centers
+        major_districts = [d for d in map_data.districts.values() if d.district_type in ['downtown', 'commercial'] and d.center]
+        for district in major_districts:
+            starts.append(district.center)
+        # Add water access points (ports, beaches)
+        for district in map_data.districts.values():
+            if district.district_type in ['port', 'beach'] and district.center:
+                starts.append(district.center)
+        # Add map edge access points
+        edge_points = [
+            (map_data.width * 0.2, map_data.height * 0.1),
+            (map_data.width * 0.8, map_data.height * 0.1),
+            (map_data.width * 0.2, map_data.height * 0.9),
+            (map_data.width * 0.8, map_data.height * 0.9),
+        ]
+        # Filter to land areas
+        for point in edge_points:
+            grid_x = int(point[0] / map_data.grid_size)
+            grid_y = int(point[1] / map_data.grid_size)
+            if (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height and map_data.land_mask[grid_y, grid_x]):
+                starts.append(point)
+        # Remove duplicates and limit
+        unique_starts = []
+        for start in starts:
+            if not any(self._distance(start, existing) < 200 for existing in unique_starts):
+                unique_starts.append(start)
+        return unique_starts[:8]  # Limit to 8 starting points
+    
+    def _distance(self, point1, point2):
+        """Calculate Euclidean distance between two points."""
+        import math
+        return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+    
+    def _find_natural_arterial_end(self, map_data: MapData, start: tuple) -> tuple:
+        """Find a good destination for an arterial road."""
+        best_end = None
+        best_score = 0
+        # Look for districts that need connection
+        for district in map_data.districts.values():
+            if district.center:
+                distance = self._distance(start, district.center)
+                if 200 < distance < 1000:  # Reasonable distance
+                    score = 1
+                    if district.district_type in ['commercial', 'downtown', 'port', 'airport']:
+                        score += 1
+                    if score > best_score:
+                        best_score = score
+                        best_end = district.center
+        # If no good district found, create a natural endpoint
+        if not best_end:
+            # Create endpoint on opposite side of map
+            if start[0] < map_data.width / 2:
+                end_x = map_data.width * 0.8
+            else:
+                end_x = map_data.width * 0.2
+            if start[1] < map_data.height / 2:
+                end_y = map_data.height * 0.8
+            else:
+                end_y = map_data.height * 0.2
+            best_end = (end_x, end_y)
+        return best_end
+    
+    def _create_organic_arterial_road(self, map_data: MapData, start: tuple, end: tuple, road_id: str, config) -> object:
+        """Create an organic arterial road that follows terrain and natural features."""
+        # Generate path using organic routing
+        path_points = self._create_organic_path(map_data, start, end, 'arterial')
+        if len(path_points) < 2:
+            return None
+        # Apply natural curvature and smoothing
+        smoothed_points = self._apply_organic_smoothing(path_points, 'arterial')
+        # Create the road
+        road = Road(
+            id=road_id,
+            road_type='arterial',
+            points=smoothed_points,
+            width=config.road_styles['arterial']['width'],
+            color=config.road_styles['arterial']['color']
+        )
+        return road
+
+    def _create_organic_path(self, map_data: MapData, start: tuple, end: tuple, road_type: str) -> list:
+        """Create an organic path that follows terrain and natural features."""
+        # Use A* pathfinding with terrain awareness
+        path = self._organic_astar_pathfinding(map_data, start, end, road_type)
+        if not path:
+            # Fallback to direct path with terrain avoidance
+            path = self._create_direct_terrain_aware_path(map_data, start, end, road_type)
+        return path
+
+    def _organic_astar_pathfinding(self, map_data: MapData, start: tuple, end: tuple, road_type: str) -> list:
+        """A* pathfinding that considers terrain, water, and natural features."""
+        # Convert to grid coordinates
+        start_grid = (int(start[0] / map_data.grid_size), int(start[1] / map_data.grid_size))
+        end_grid = (int(end[0] / map_data.grid_size), int(end[1] / map_data.grid_size))
+        # A* implementation with terrain cost
+        open_set = {start_grid}
+        came_from = {}
+        g_score = {start_grid: 0}
+        f_score = {start_grid: self._heuristic(start_grid, end_grid)}
+        while open_set:
+            current = min(open_set, key=lambda x: f_score.get(x, float('inf')))
+            if current == end_grid:
+                # Reconstruct path
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.append(start_grid)
+                path.reverse()
+                # Convert back to map coordinates and add intermediate points
+                return self._convert_grid_path_to_map_path(path, map_data)
+            open_set.remove(current)
+            # Check neighbors
+            for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+                neighbor = (current[0] + dx, current[1] + dy)
+                if (0 <= neighbor[0] < map_data.grid_width and 0 <= neighbor[1] < map_data.grid_height):
+                    # Calculate movement cost based on terrain
+                    terrain_cost = self._calculate_terrain_cost(map_data, neighbor, road_type)
+                    if terrain_cost < float('inf'):  # Valid move
+                        tentative_g_score = g_score[current] + terrain_cost
+                        if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
+                            came_from[neighbor] = current
+                            g_score[neighbor] = tentative_g_score
+                            f_score[neighbor] = tentative_g_score + self._heuristic(neighbor, end_grid)
+                            open_set.add(neighbor)
+        return []  # No path found
+
+    def _heuristic(self, pos1: tuple, pos2: tuple) -> float:
+        """Heuristic function for A* (Manhattan distance)."""
+        return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
+
+    def _calculate_terrain_cost(self, map_data: MapData, grid_pos: tuple, road_type: str) -> float:
+        """Calculate movement cost based on terrain type and elevation."""
+        x, y = grid_pos
+        if not map_data.land_mask[y, x]:
+            return float('inf')  # Can't build on water
+        elevation = map_data.heightmap[y, x]
+        base_cost = 1.0
+        # Elevation penalties
+        if elevation > 0.7:  # Mountains
+            base_cost *= 5.0
+        elif elevation > 0.6:  # Hills
+            base_cost *= 2.0
+        elif elevation < 0.4:  # Low areas (flood risk)
+            base_cost *= 1.5
+        # Road type adjustments
+        if road_type == 'highway':
+            base_cost *= 0.8  # Highways can handle more difficult terrain
+        elif road_type == 'local':
+            base_cost *= 1.2  # Local roads prefer easier terrain
+        return base_cost
+
+    def _convert_grid_path_to_map_path(self, grid_path: list, map_data: MapData) -> list:
+        """Convert grid path to map coordinates with intermediate points."""
+        map_path = []
+        for i, grid_pos in enumerate(grid_path):
+            map_x = grid_pos[0] * map_data.grid_size + map_data.grid_size / 2
+            map_y = grid_pos[1] * map_data.grid_size + map_data.grid_size / 2
+            map_path.append((map_x, map_y))
+            # Add intermediate points for smoother curves
+            if i < len(grid_path) - 1:
+                next_grid = grid_path[i + 1]
+                # Add a point between current and next for smoother curves
+                mid_x = (grid_pos[0] + next_grid[0]) / 2 * map_data.grid_size + map_data.grid_size / 2
+                mid_y = (grid_pos[1] + next_grid[1]) / 2 * map_data.grid_size + map_data.grid_size / 2
+                map_path.append((mid_x, mid_y))
+        return map_path
+
+    def _apply_organic_smoothing(self, points: list, road_type: str) -> list:
+        """Apply organic smoothing to road points."""
+        if len(points) < 3:
+            return points
+        smoothed = [points[0]]
+        for i in range(1, len(points) - 1):
+            prev = points[i - 1]
+            curr = points[i]
+            next_point = points[i + 1]
+            # Calculate smoothed point using weighted average with more weight on neighbors
+            weight = 0.4 if road_type == 'arterial' else 0.6
+            smoothed_x = curr[0] * (1 - weight) + (prev[0] + next_point[0]) / 2 * weight
+            smoothed_y = curr[1] * (1 - weight) + (prev[1] + next_point[1]) / 2 * weight
+            smoothed.append((smoothed_x, smoothed_y))
+        smoothed.append(points[-1])
+        return smoothed
+
+    def _create_secondary_arterials(self, map_data: MapData, config: TransportationConfig):
+        """Create secondary arterial roads that branch off main arterials."""
+        if not self.arterial_spine:
+            return
+        secondary_count = 0
+        max_secondary = min(10, len(self.arterial_spine) * 2)
+        for arterial in self.arterial_spine:
+            if secondary_count >= max_secondary:
+                break
+            branch_points = self._find_branching_points(arterial, map_data)
+            for branch_point in branch_points:
+                if secondary_count >= max_secondary:
+                    break
+                destination = self._find_secondary_destination(map_data, branch_point)
+                if destination:
+                    secondary_road = self._create_organic_arterial_road(
+                        map_data, branch_point, destination, f"secondary_arterial_{secondary_count}", config
+                    )
+                    if secondary_road:
+                        map_data.add_road(secondary_road)
+                        secondary_count += 1
+
+    def _find_branching_points(self, arterial: Road, map_data: MapData) -> list:
+        """Find good points along an arterial for branching secondary roads."""
+        if not arterial.points or len(arterial.points) < 3:
+            return []
+        branch_points = []
+        # Sample points along the arterial with more spacing
+        for i in range(2, len(arterial.points) - 2, 5):
+            point = arterial.points[i]
+            # Check if this is a good branching location
+            if self._is_good_branching_location(map_data, point):
+                branch_points.append(point)
+        return branch_points[:2]  # Limit to 2 branches per arterial
+
+    def _is_good_branching_location(self, map_data: MapData, point: tuple) -> bool:
+        """Check if a point is suitable for branching a secondary road."""
+        grid_x = int(point[0] / map_data.grid_size)
+        grid_y = int(point[1] / map_data.grid_size)
+        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
+            return False
+        # Check if area is suitable (not too close to water, good elevation)
+        elevation = map_data.heightmap[grid_y, grid_x]
+        if elevation < 0.4 or elevation > 0.7:
+            return False
+        # Check if not too close to existing roads
+        for road in map_data.roads.values():
+            if road.points:
+                min_dist = min(self._distance(point, road_point) for road_point in road.points)
+                if min_dist < 100:
+                    return False
+        return True
+
+    def _create_direct_terrain_aware_path(self, map_data: MapData, start: tuple, end: tuple, road_type: str) -> list:
+        """Create a direct path that avoids major obstacles."""
+        path = [start]
+        num_points = max(3, int(self._distance(start, end) / 100))
+        for i in range(1, num_points):
+            t = i / num_points
+            point = self._lerp(start, end, t)
+            adjusted_point = self._avoid_obstacles(map_data, point, road_type)
+            path.append(adjusted_point)
+        path.append(end)
+        return path
+
+    def _lerp(self, start: tuple, end: tuple, t: float) -> tuple:
+        """Linear interpolation between two points."""
+        return (start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t)
+
+    def _avoid_obstacles(self, map_data: MapData, point: tuple, road_type: str) -> tuple:
+        """Adjust point to avoid water bodies and other obstacles."""
+        x, y = point
+        avoidance_radius = 80 if road_type in ['highway', 'arterial'] else 50
+        # Check for water bodies
+        for water_body in map_data.water_bodies.values():
+            if hasattr(water_body, 'geometry') and water_body.geometry:
+                distance = water_body.geometry.distance(Point(x, y))
+                if distance < avoidance_radius:
+                    # Calculate avoidance vector
+                    if water_body.geometry.contains(Point(x, y)):
+                        # Point is inside water - find nearest edge and move out
+                        boundary = water_body.geometry.boundary
+                        nearest_point = boundary.interpolate(boundary.project(Point(x, y)))
+                        # Move away from water
+                        avoid_x = x + (x - nearest_point.x) * 2
+                        avoid_y = y + (y - nearest_point.y) * 2
+                    else:
+                        # Point is near water - adjust to maintain distance
+                        centroid = water_body.geometry.centroid
+                        dx = x - centroid.x
+                        dy = y - centroid.y
+                        length = math.sqrt(dx**2 + dy**2)
+                        if length > 0:
+                            # Move away from water center
+                            avoid_x = x + (dx / length) * (avoidance_radius - distance)
+                            avoid_y = y + (dy / length) * (avoidance_radius - distance)
+                        else:
+                            avoid_x, avoid_y = x, y
+                    # Ensure within map bounds
+                    x = max(50, min(map_data.width - 50, avoid_x))
+                    y = max(50, min(map_data.height - 50, avoid_y))
+        return (x, y)
 
 
 # Backward compatibility with existing system
