@@ -52,8 +52,11 @@ class MapRenderer:
         fig_height = 12
         self.figure, self.ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
         
-        # Render terrain background
+        # Render terrain background with biomes
         self._render_terrain(map_data, config)
+        
+        # Render biomes
+        self._render_biomes(map_data, config)
         
         # Render water bodies
         self._render_water_bodies(map_data)
@@ -61,17 +64,23 @@ class MapRenderer:
         # Render districts
         self._render_districts(map_data, config)
         
-        # Render roads
+        # Render roads and railways
         self._render_roads(map_data, config)
+        self._render_railways(map_data, config)
+        
+        # Render bridges and tunnels
+        self._render_bridges(map_data, config)
+        self._render_tunnels(map_data, config)
         
         # Render buildings
         self._render_buildings(map_data, config)
         
+        # Render parks and agricultural zones
+        self._render_parks(map_data)
+        self._render_agricultural_zones(map_data, config)
+        
         # Render POIs
         self._render_pois(map_data)
-        
-        # Render parks
-        self._render_parks(map_data)
         
         # Configure map appearance
         self._configure_map_appearance(map_data, show_legend, config)
@@ -414,6 +423,162 @@ class MapRenderer:
             'beach': '#D8D8D8',         # Light for beach buildings
         }
         return colors.get(district_type, '#D0D0D0')
+    
+    def _render_biomes(self, map_data: MapData, config: MapConfig):
+        """Render biome backgrounds."""
+        if hasattr(map_data, 'biome_map') and map_data.biome_map is not None:
+            # Get biome colors from config
+            biome_colors = getattr(config, 'biomes', None)
+            if biome_colors and hasattr(biome_colors, 'biome_colors'):
+                colors = biome_colors.biome_colors
+            else:
+                # Default biome colors
+                colors = {
+                    'water': '#0077cc',
+                    'beach': '#F4E4BC',
+                    'coastal_plains': '#90EE90',
+                    'plains': '#9ACD32',
+                    'agricultural': '#DAA520',
+                    'wetlands': '#2E8B57',
+                    'forest': '#228B22',
+                    'hills': '#8FBC8F',
+                    'mountain_forest': '#556B2F',
+                    'mountain_peaks': '#A0522D'
+                }
+            
+            # Create a color array for the biome map
+            height, width = map_data.biome_map.shape
+            color_array = np.zeros((height, width, 4))  # RGBA
+            
+            for y in range(height):
+                for x in range(width):
+                    biome = map_data.biome_map[y, x]
+                    if biome in colors:
+                        hex_color = colors[biome]
+                        # Convert hex to RGBA
+                        rgb = mcolors.hex2color(hex_color)
+                        color_array[y, x] = (*rgb, 0.4)  # Semi-transparent
+            
+            # Display biome map
+            extent = [0, map_data.width, 0, map_data.height]
+            self.ax.imshow(
+                color_array,
+                extent=extent,
+                origin='lower',
+                aspect='equal',
+                zorder=1
+            )
+    
+    def _render_railways(self, map_data: MapData, config: MapConfig):
+        """Render railway networks."""
+        railways = [r for r in map_data.roads.values() if r.road_type == 'railway']
+        
+        for railway in railways:
+            if len(railway.points) > 1:
+                x_coords = [p[0] for p in railway.points]
+                y_coords = [p[1] for p in railway.points]
+                
+                # Railway ties (sleepers)
+                self.ax.plot(
+                    x_coords, y_coords,
+                    color='#8B4513',
+                    linewidth=railway.width + 2,
+                    solid_capstyle='round',
+                    alpha=0.8,
+                    zorder=7
+                )
+                
+                # Railway tracks
+                for offset in [-1, 1]:
+                    offset_x = [x + offset for x in x_coords]
+                    self.ax.plot(
+                        offset_x, y_coords,
+                        color='#C0C0C0',
+                        linewidth=1,
+                        solid_capstyle='round',
+                        alpha=0.9,
+                        zorder=8
+                    )
+    
+    def _render_bridges(self, map_data: MapData, config: MapConfig):
+        """Render bridges."""
+        if hasattr(map_data, 'bridges'):
+            for bridge in map_data.bridges:
+                # Bridge deck
+                x_coords = [bridge.start_point[0], bridge.end_point[0]]
+                y_coords = [bridge.start_point[1], bridge.end_point[1]]
+                
+                # Bridge outline
+                self.ax.plot(
+                    x_coords, y_coords,
+                    color='#654321',
+                    linewidth=bridge.width + 4,
+                    solid_capstyle='round',
+                    alpha=0.9,
+                    zorder=9
+                )
+                
+                # Bridge surface
+                bridge_color = '#8B7355' if bridge.bridge_type == 'railway' else '#D2691E'
+                self.ax.plot(
+                    x_coords, y_coords,
+                    color=bridge_color,
+                    linewidth=bridge.width,
+                    solid_capstyle='round',
+                    alpha=0.9,
+                    zorder=10
+                )
+    
+    def _render_tunnels(self, map_data: MapData, config: MapConfig):
+        """Render tunnel portals."""
+        if hasattr(map_data, 'tunnels'):
+            for tunnel in map_data.tunnels:
+                # Tunnel portals at start and end
+                for point in [tunnel.start_point, tunnel.end_point]:
+                    # Portal entrance
+                    circle = plt.Circle(
+                        point,
+                        tunnel.width / 2,
+                        facecolor='#404040',
+                        edgecolor='#202020',
+                        linewidth=2,
+                        alpha=0.8,
+                        zorder=8
+                    )
+                    self.ax.add_patch(circle)
+    
+    def _render_agricultural_zones(self, map_data: MapData, config: MapConfig):
+        """Render agricultural zones."""
+        agricultural_parks = [p for p in map_data.parks.values() if p.park_type == 'agricultural']
+        
+        for zone in agricultural_parks:
+            if zone.polygon:
+                # Agricultural field pattern
+                polygon = MatplotlibPolygon(
+                    list(zone.polygon.exterior.coords),
+                    closed=True,
+                    facecolor='#DAA520',
+                    alpha=0.4,
+                    edgecolor='#B8860B',
+                    linewidth=1,
+                    linestyle='--',
+                    zorder=4
+                )
+                self.ax.add_patch(polygon)
+                
+                # Add simple field marker
+                center = zone.center
+                self.ax.text(
+                    center[0], center[1],
+                    'AG',
+                    fontsize=8,
+                    ha='center',
+                    va='center',
+                    weight='bold',
+                    color='#8B7B00',
+                    alpha=0.7,
+                    zorder=5
+                )
     
     def export_data(self, map_data: MapData, export_path: str, format: str = 'json'):
         """

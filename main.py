@@ -52,8 +52,10 @@ def generate_map(config=None, preset_name=None, output_dir="output"):
         json.dump(map_data.to_dict(), f, indent=2, cls=NumpyJSONEncoder)
     
     # Save PNG image
+    from src.rendering.map_renderer import MapRenderer
+    renderer = MapRenderer()
     png_path = os.path.join(output_dir, f"{base_name}.png")
-    map_data.render_to_file(png_path)
+    renderer.render_map(map_data, config, save_path=png_path)
     
     print(f"Map generated successfully!")
     print(f"  JSON: {json_path}")

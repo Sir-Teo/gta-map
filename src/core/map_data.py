@@ -187,6 +187,7 @@ class MapData:
         # Terrain data
         self.heightmap: Optional[np.ndarray] = None
         self.land_mask: Optional[np.ndarray] = None
+        self.biome_map: Optional[np.ndarray] = None
         
         # Map elements
         self.districts: Dict[str, District] = {}
@@ -196,6 +197,11 @@ class MapData:
         self.pois: Dict[str, POI] = {}
         self.parks: Dict[str, Park] = {}
         self.city_blocks: Dict[str, CityBlock] = {}
+        
+        # Advanced infrastructure
+        self.bridges: List = []
+        self.tunnels: List = []
+        self.railways: Dict[str, Road] = {}
         
         # Metadata
         self.generation_seed: Optional[int] = None
@@ -229,6 +235,20 @@ class MapData:
     def add_city_block(self, city_block: CityBlock) -> None:
         """Add a city block to the map."""
         self.city_blocks[city_block.id] = city_block
+    
+    def add_bridge(self, bridge) -> None:
+        """Add a bridge to the map."""
+        self.bridges.append(bridge)
+    
+    def add_tunnel(self, tunnel) -> None:
+        """Add a tunnel to the map."""
+        self.tunnels.append(tunnel)
+    
+    def add_railway(self, railway: Road) -> None:
+        """Add a railway to the map."""
+        self.railways[railway.id] = railway
+        # Also add to roads for unified access
+        self.roads[railway.id] = railway
     
     def get_district_by_point(self, x: float, y: float) -> Optional[District]:
         """Find which district contains the given point."""

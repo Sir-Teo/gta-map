@@ -12,9 +12,12 @@ class TerrainConfig:
     """Configuration for terrain generation."""
     water_level: float = 0.35
     beach_level: float = 0.4
-    mountain_count_range: Tuple[int, int] = (1, 3)
+    mountain_count_range: Tuple[int, int] = (2, 4)
     terrain_scale: float = 0.005
     mountain_scale_multiplier: float = 2.0
+    enable_erosion: bool = True
+    enable_biomes: bool = True
+    continental_scale: float = 0.6
     
     
 @dataclass
@@ -47,15 +50,26 @@ class TransportationConfig:
     collector_spacing: int = 200
     local_road_density: float = 0.3
     road_curve_factor: float = 0.2
-    highway_count_range: Tuple[int, int] = (2, 4)
+    highway_count_range: Tuple[int, int] = (3, 6)
+    enable_bridges: bool = True
+    enable_tunnels: bool = True
+    enable_railways: bool = True
+    elevation_cost_factor: float = 1.0
     
     road_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         'arterial': {'color': '#333333', 'width': 8},
         'collector': {'color': '#555555', 'width': 5},
-        'highway': {'color': '#000000', 'width': 10},
+        'highway': {'color': '#000000', 'width': 12},
         'local': {'color': '#777777', 'width': 3},
         'rural': {'color': '#999999', 'width': 2},
-        'path': {'color': '#bbbbbb', 'width': 1}
+        'path': {'color': '#bbbbbb', 'width': 1},
+        'railway': {'color': '#8B4513', 'width': 6}
+    })
+    
+    bridge_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
+        'highway': {'color': '#8B4513', 'width': 14},
+        'road': {'color': '#8B4513', 'width': 10},
+        'railway': {'color': '#654321', 'width': 8}
     })
 
 
@@ -126,20 +140,46 @@ class POIConfig:
 @dataclass
 class WaterConfig:
     """Configuration for water body generation."""
-    river_count_range: Tuple[int, int] = (0, 3)
-    lake_count_range: Tuple[int, int] = (2, 5)
-    river_width_range: Tuple[float, float] = (30.0, 60.0)
-    lake_radius_range: Tuple[float, float] = (30.0, 100.0)
+    river_count_range: Tuple[int, int] = (2, 6)
+    lake_count_range: Tuple[int, int] = (3, 8)
+    river_width_range: Tuple[float, float] = (20.0, 50.0)
+    lake_radius_range: Tuple[float, float] = (40.0, 120.0)
+    enable_drainage_networks: bool = True
+    coastal_features: bool = True
+
+
+@dataclass
+class BiomeConfig:
+    """Configuration for biome generation."""
+    enable_forests: bool = True
+    enable_agricultural_areas: bool = True
+    enable_wetlands: bool = True
+    forest_coverage: float = 0.15  # Percentage of map covered by forests
+    agricultural_coverage: float = 0.20  # Percentage suitable for agriculture
+    
+    biome_colors: Dict[str, str] = field(default_factory=lambda: {
+        'water': '#0077cc',
+        'beach': '#F4E4BC',
+        'coastal_plains': '#90EE90',
+        'plains': '#9ACD32',
+        'agricultural': '#DAA520',
+        'wetlands': '#2E8B57',
+        'forest': '#228B22',
+        'hills': '#8FBC8F',
+        'mountain_forest': '#556B2F',
+        'mountain_peaks': '#A0522D'
+    })
 
 
 @dataclass
 class MapConfig:
     """Main configuration class that combines all other configs."""
-    name: str = "Generated City"
+    name: str = "Generated Region"
     width: int = 2000
     height: int = 2000
     seed: int = None
     grid_size: int = 20
+    enable_multi_city: bool = True
     
     # Sub-configurations
     terrain: TerrainConfig = field(default_factory=TerrainConfig)
@@ -148,6 +188,7 @@ class MapConfig:
     buildings: BuildingConfig = field(default_factory=BuildingConfig)
     pois: POIConfig = field(default_factory=POIConfig)
     water: WaterConfig = field(default_factory=WaterConfig)
+    biomes: BiomeConfig = field(default_factory=BiomeConfig)
     
     def __post_init__(self):
         """Initialize computed properties after creation."""
@@ -173,6 +214,7 @@ class MapConfig:
         buildings = BuildingConfig(**config_dict.get('buildings', {}))
         pois = POIConfig(**config_dict.get('pois', {}))
         water = WaterConfig(**config_dict.get('water', {}))
+        biomes = BiomeConfig(**config_dict.get('biomes', {}))
         
         return cls(
             **main_params,
@@ -181,7 +223,8 @@ class MapConfig:
             transportation=transportation,
             buildings=buildings,
             pois=pois,
-            water=water
+            water=water,
+            biomes=biomes
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -191,12 +234,14 @@ class MapConfig:
             'height': self.height,
             'seed': self.seed,
             'grid_size': self.grid_size,
+            'enable_multi_city': self.enable_multi_city,
             'terrain': self.terrain.__dict__,
             'districts': self.districts.__dict__,
             'transportation': self.transportation.__dict__,
             'buildings': self.buildings.__dict__,
             'pois': self.pois.__dict__,
-            'water': self.water.__dict__
+            'water': self.water.__dict__,
+            'biomes': self.biomes.__dict__
         }
 
 
@@ -208,31 +253,47 @@ def create_default_config(**overrides) -> MapConfig:
 def create_preset_config(preset_name: str, **overrides) -> MapConfig:
     """Create predefined configuration presets."""
     presets = {
-        'small_city': {
-            'width': 1000,
-            'height': 1000,
-            'districts': {'district_count': 6}
+        'small_town': {
+            'name': 'Small Town',
+            'width': 1200,
+            'height': 1200,
+            'enable_multi_city': False,
+            'districts': {'district_count': 4},
+            'transportation': {'highway_count_range': (1, 2), 'enable_railways': False}
         },
         'large_metropolis': {
-            'width': 3000,
-            'height': 3000,
-            'districts': {'district_count': 15}
+            'name': 'Large Metropolis', 
+            'width': 3500,
+            'height': 3500,
+            'terrain': {'mountain_count_range': (3, 5)},
+            'water': {'river_count_range': (4, 8)},
+            'transportation': {'highway_count_range': (6, 10), 'enable_railways': True}
         },
-        'island_paradise': {
-            'width': 2000,
-            'height': 2000,
-            'terrain': {'water_level': 0.3, 'mountain_count_range': (2, 4)},
-            'water': {'lake_count_range': (5, 8)}
-        },
-        'urban_sprawl': {
+        'island_archipelago': {
+            'name': 'Island Archipelago',
             'width': 2500,
             'height': 2500,
-            'districts': {'district_count': 12},
-            'buildings': {'density_map': {
-                'residential': 0.0008,
-                'suburban': 0.0006,
-                'commercial': 0.001
-            }}
+            'terrain': {'water_level': 0.3, 'mountain_count_range': (3, 6), 'continental_scale': 0.4},
+            'water': {'river_count_range': (3, 6), 'lake_count_range': (6, 12), 'coastal_features': True},
+            'biomes': {'forest_coverage': 0.25}
+        },
+        'continental_region': {
+            'name': 'Continental Region',
+            'width': 4000,
+            'height': 4000,
+            'terrain': {'mountain_count_range': (4, 7), 'continental_scale': 0.8},
+            'water': {'river_count_range': (6, 12)},
+            'biomes': {'forest_coverage': 0.2, 'agricultural_coverage': 0.3},
+            'transportation': {'highway_count_range': (8, 12), 'enable_railways': True}
+        },
+        'mountain_valleys': {
+            'name': 'Mountain Valleys',
+            'width': 2000,
+            'height': 2000,
+            'terrain': {'mountain_count_range': (4, 6), 'water_level': 0.4},
+            'water': {'river_count_range': (4, 8)},
+            'biomes': {'forest_coverage': 0.3},
+            'transportation': {'enable_tunnels': True, 'elevation_cost_factor': 2.0}
         }
     }
     

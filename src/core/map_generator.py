@@ -77,11 +77,13 @@ class MapGenerator:
         
         steps = [
             ("Generating terrain and heightmap", self._generate_terrain),
-            ("Placing districts", self._place_districts),
+            ("Placing districts and settlements", self._place_districts),
             ("Creating transportation network", self._generate_transportation),
+            ("Building bridges and tunnels", self._generate_infrastructure),
+            ("Creating railway network", self._generate_railways),
             ("Defining urban structure", self._plan_urban_layout),
             ("Placing buildings", self._generate_buildings),
-            ("Adding features and landmarks", self._generate_features),
+            ("Adding natural features", self._generate_features),
         ]
         
         self._generation_steps = steps
@@ -128,13 +130,35 @@ class MapGenerator:
         self.district_generator.place_districts(self.map_data, self.config.districts)
     
     def _generate_transportation(self):
-        """Generate roads, highways, and transportation networks."""
+        """Generate roads, highways, and basic transportation networks."""
         if not self.transportation_generator:
             raise ValueError("Transportation generator not set")
         
         self.transportation_generator.generate_highway_network(self.map_data, self.config.transportation)
         self.transportation_generator.generate_arterial_grid(self.map_data, self.config.transportation)
         self.transportation_generator.generate_local_roads(self.map_data, self.config.transportation)
+    
+    def _generate_infrastructure(self):
+        """Generate bridges and tunnels for the transportation network."""
+        if not self.transportation_generator:
+            raise ValueError("Transportation generator not set")
+        
+        # Generate bridges and tunnels using the advanced transportation system
+        if hasattr(self.transportation_generator, 'advanced_generator'):
+            if self.config.transportation.enable_bridges:
+                self.transportation_generator.advanced_generator.generate_bridges(self.map_data, self.config.transportation)
+            
+            if self.config.transportation.enable_tunnels:
+                self.transportation_generator.advanced_generator.generate_tunnels(self.map_data, self.config.transportation)
+    
+    def _generate_railways(self):
+        """Generate railway network."""
+        if not self.transportation_generator:
+            raise ValueError("Transportation generator not set")
+        
+        # Generate railways using the advanced transportation system
+        if hasattr(self.transportation_generator, 'advanced_generator') and self.config.transportation.enable_railways:
+            self.transportation_generator.advanced_generator.generate_railway_network(self.map_data, self.config.transportation)
     
     def _plan_urban_layout(self):
         """Define city blocks and urban structure."""
