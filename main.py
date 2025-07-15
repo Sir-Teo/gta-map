@@ -97,6 +97,53 @@ def run_web():
 
 
 if __name__ == "__main__":
+    from src.core.map_generator import generate_map
+    from src.rendering.map_renderer import MapRenderer
+    from src.config.settings import create_default_config, DistrictConfig, TransportationConfig, BuildingConfig, WaterConfig
+
+    # Healthy mixture of metropolis, river valley, and coastal city
+    config_overrides = {
+        'districts': DistrictConfig(**{
+            'district_count': 10,  # More districts for urban complexity
+            'minimum_district_distance': 400.0,  # Allow some overlap for realism
+        }),
+        'transportation': TransportationConfig(**{
+            'arterial_spacing': 1400,  # More organic, less grid
+            'collector_spacing': 900,  # More organic, less grid
+            'local_road_density': 0.18,  # More local roads for urban feel
+            'road_curve_factor': 1.2,  # More curves for natural look
+            'enable_bridges': True,
+            'enable_tunnels': True,
+            'enable_railways': True,
+        }),
+        'buildings': BuildingConfig(**{
+            'density_map': {
+                'downtown': 0.0012,  # Denser city center
+                'commercial': 0.0009,
+                'residential': 0.0005,
+                'industrial': 0.0003,
+                'default': 0.0002
+            }
+        }),
+        'water': WaterConfig(**{
+            'river_count_range': (3, 5),  # Multiple rivers
+            'lake_count_range': (4, 8),   # More lakes
+            'river_width_range': (40.0, 80.0),
+            'coastal_features': True,     # Enable coastlines
+        }),
+        'seed': 67890,  # New seed for variety
+        'enable_multi_city': True,
+    }
+
+    print("Generating organized GTA map...")
+    config = create_default_config(**config_overrides)
+    generator = MapGeneratorFactory.create_generator(config)
+    map_data = generator.generate_complete_map()
+    print("Rendering map...")
+    renderer = MapRenderer()
+    renderer.render_map(map_data, config, save_path="static/gta_map_generated_region.png")
+    print("Map generation and rendering complete! Output saved to static/gta_map_generated_region.png")
+
     if len(sys.argv) > 1:
         run_cli()
     else:
