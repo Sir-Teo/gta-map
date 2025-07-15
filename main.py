@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""
+GTA Map Generator - Unified System
+==================================
+
+A comprehensive city map generation system with modular architecture.
+Supports both command-line and web interface modes.
+
+Usage:
+    python main.py                    # Start web interface
+    python main.py --cli              # Run CLI mode
+    python main.py --generate         # Generate a map and save
+    python main.py --preset <name>    # Use a specific preset
+    python main.py --config <file>    # Use custom config file
+"""
+
+import argparse
+import sys
+import os
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from src.core.map_generator import MapGeneratorFactory
+from src.config.settings import MapConfig, create_preset_config
+from src.web.app import create_app
+from src.core.map_data import MapDataJSONEncoder
+import json
+
+
+def generate_map(config=None, preset_name=None, output_dir="output"):
+    """Generate a map with the given configuration"""
+    if preset_name:
+        config = create_preset_config(preset_name)
+    elif config is None:
+        config = MapConfig()
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate map
+    generator = MapGeneratorFactory.create_generator(config)
+    map_data = generator.generate_complete_map()
+    
+    # Save outputs
+    base_name = f"gta_map_{config.name.lower().replace(' ', '_')}"
+    
+    # Save JSON data
+    json_path = os.path.join(output_dir, f"{base_name}.json")
+    with open(json_path, 'w') as f:
+        json.dump(map_data.to_dict(), f, indent=2, cls=MapDataJSONEncoder)
+    
+    # Save PNG image
+    png_path = os.path.join(output_dir, f"{base_name}.png")
+    map_data.render_to_file(png_path)
+    
+    print(f"Map generated successfully!")
+    print(f"  JSON: {json_path}")
+    print(f"  PNG:  {png_path}")
+    
+    return map_data
+
+
+def run_cli():
+    """Run the system in CLI mode"""
+    parser = argparse.ArgumentParser(description="GTA Map Generator")
+    parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
+    parser.add_argument("--generate", action="store_true", help="Generate a map")
+    parser.add_argument("--preset", type=str, help="Use a specific preset")
+    parser.add_argument("--config", type=str, help="Custom config file")
+    parser.add_argument("--output", type=str, default="output", help="Output directory")
+    
+    args = parser.parse_args()
+    
+    if args.generate or args.preset or args.config:
+        # CLI generation mode
+        config = None
+        if args.config:
+            with open(args.config, 'r') as f:
+                config_data = json.load(f)
+                config = MapConfig(**config_data)
+        
+        generate_map(config=config, preset_name=args.preset, output_dir=args.output)
+    else:
+        # Web interface mode
+        app = create_app()
+        app.run(host='0.0.0.0', port=5001, debug=True)
+
+
+def run_web():
+    """Run the web interface"""
+    app = create_app()
+    app.run(host='0.0.0.0', port=5001, debug=True)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        run_cli()
+    else:
+        run_web() 
