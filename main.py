@@ -101,37 +101,39 @@ if __name__ == "__main__":
     from src.rendering.map_renderer import MapRenderer
     from src.config.settings import create_default_config, DistrictConfig, TransportationConfig, BuildingConfig, WaterConfig
 
-    # Healthy mixture of metropolis, river valley, and coastal city
+    # Enhanced config for a large, organic, beautiful map
     config_overrides = {
+        'width': 3500,
+        'height': 3500,
         'districts': DistrictConfig(**{
-            'district_count': 10,  # More districts for urban complexity
-            'minimum_district_distance': 400.0,  # Allow some overlap for realism
+            'district_count': 16,  # More districts for urban complexity
+            'minimum_district_distance': 350.0,  # Allow more overlap
         }),
         'transportation': TransportationConfig(**{
-            'arterial_spacing': 1400,  # More organic, less grid
-            'collector_spacing': 900,  # More organic, less grid
-            'local_road_density': 0.18,  # More local roads for urban feel
-            'road_curve_factor': 1.2,  # More curves for natural look
+            'arterial_spacing': 1600,  # More organic, less grid
+            'collector_spacing': 1000,  # More organic, less grid
+            'local_road_density': 0.28,  # Much more local roads
+            'road_curve_factor': 1.7,  # Stronger curves for natural look
             'enable_bridges': True,
             'enable_tunnels': True,
             'enable_railways': True,
         }),
         'buildings': BuildingConfig(**{
             'density_map': {
-                'downtown': 0.0012,  # Denser city center
-                'commercial': 0.0009,
-                'residential': 0.0005,
-                'industrial': 0.0003,
-                'default': 0.0002
+                'downtown': 0.0015,  # Denser city center
+                'commercial': 0.0011,
+                'residential': 0.0007,
+                'industrial': 0.0004,
+                'default': 0.00025
             }
         }),
         'water': WaterConfig(**{
-            'river_count_range': (3, 5),  # Multiple rivers
-            'lake_count_range': (4, 8),   # More lakes
-            'river_width_range': (40.0, 80.0),
+            'river_count_range': (4, 7),  # More rivers
+            'lake_count_range': (6, 12),   # More lakes
+            'river_width_range': (50.0, 100.0),
             'coastal_features': True,     # Enable coastlines
         }),
-        'seed': 67890,  # New seed for variety
+        'seed': 98765,  # New seed for variety
         'enable_multi_city': True,
     }
 
