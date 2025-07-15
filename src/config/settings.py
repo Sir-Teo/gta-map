@@ -3,7 +3,7 @@ Configuration settings for the GTA Map Generator.
 Centralized configuration for all map generation parameters.
 """
 import random
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from dataclasses import dataclass, field
 
 
@@ -46,24 +46,24 @@ class DistrictConfig:
 @dataclass
 class TransportationConfig:
     """Configuration for road and transportation networks."""
-    arterial_spacing: int = 800  # Increased for much more organic spacing
-    collector_spacing: int = 500  # Increased for much more organic spacing
-    local_road_density: float = 0.2  # Reduced for less cluttered local roads
-    road_curve_factor: float = 0.6  # Increased for more natural curves
-    highway_count_range: Tuple[int, int] = (1, 3)  # Reduced for less grid-like highways
+    arterial_spacing: int = 700  # Slightly denser, but still organic
+    collector_spacing: int = 400  # Slightly denser
+    local_road_density: float = 0.28  # More local roads for richer city fabric
+    road_curve_factor: float = 0.85  # Much more natural curves
+    highway_count_range: Tuple[int, int] = (2, 4)  # Slightly more highways for realism
     enable_bridges: bool = True
     enable_tunnels: bool = True
     enable_railways: bool = True
-    elevation_cost_factor: float = 2.0  # Increased to make roads follow terrain more
+    elevation_cost_factor: float = 2.2  # Roads follow terrain even more
     
     road_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
-        'arterial': {'color': '#444444', 'width': 4},  # Thinner arterial roads
-        'collector': {'color': '#666666', 'width': 3},  # Thinner collector roads
-        'highway': {'color': '#000000', 'width': 6},    # Thinner highways
-        'local': {'color': '#888888', 'width': 2},      # Much thinner local roads
-        'rural': {'color': '#aaaaaa', 'width': 1},      # Very thin rural roads
-        'path': {'color': '#cccccc', 'width': 1},       # Thin paths
-        'railway': {'color': '#8B4513', 'width': 3}     # Thinner railways
+        'arterial': {'color': '#3a3a3a', 'width': 7},  # Wider, darker
+        'collector': {'color': '#5a5a5a', 'width': 5},  # Wider
+        'highway': {'color': '#222222', 'width': 11},   # Much wider, deep black
+        'local': {'color': '#b0b0b0', 'width': 3.5},    # Wider, lighter for city feel
+        'rural': {'color': '#cccccc', 'width': 2},      # Wider, pale
+        'path': {'color': '#e0e0e0', 'width': 1.5},     # Slightly wider
+        'railway': {'color': '#8B4513', 'width': 4}     # Slightly wider
     })
     
     bridge_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
@@ -175,10 +175,10 @@ class BiomeConfig:
 class MapConfig:
     """Main configuration class that combines all other configs."""
     name: str = "Generated Region"
-    width: int = 2000
-    height: int = 2000
+    width: int = 4000
+    height: int = 4000
     seed: int = None
-    grid_size: int = 20
+    grid_size: int = 20  # Keep as is unless performance is an issue
     enable_multi_city: bool = True
     
     # Sub-configurations

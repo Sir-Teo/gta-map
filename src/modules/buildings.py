@@ -87,21 +87,39 @@ class BuildingGenerator:
         length = random.uniform(*size_config['length'])
         
         # Try to place building within block bounds
-        max_attempts = 20
+        max_attempts = 30
         for _ in range(max_attempts):
             # Random position within block bounds, with some margin
             margin = max(width, length) / 2
-            x = random.uniform(min_x + margin, max_x - width - margin)
-            y = random.uniform(min_y + margin, max_y - length - margin)
-            
+            # Try to bias placement closer to roads
+            if block.polygon and map_data.roads:
+                # Find nearest road point to block center
+                from shapely.geometry import Point
+                block_center = block.polygon.centroid
+                nearest_road_point = None
+                min_dist = float('inf')
+                for road in map_data.roads.values():
+                    for pt in road.points:
+                        dist = block_center.distance(Point(pt))
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest_road_point = pt
+                if nearest_road_point:
+                    # Place building near the nearest road point
+                    x = nearest_road_point[0] + random.uniform(-30, 30)
+                    y = nearest_road_point[1] + random.uniform(-30, 30)
+                else:
+                    x = random.uniform(min_x + margin, max_x - width - margin)
+                    y = random.uniform(min_y + margin, max_y - length - margin)
+            else:
+                x = random.uniform(min_x + margin, max_x - width - margin)
+                y = random.uniform(min_y + margin, max_y - length - margin)
             # Check if building center is within the block polygon
             building_center = Point(x + width/2, y + length/2)
             if polygon.contains(building_center):
                 # Validate that building is on land
                 if self._is_on_land(x + width/2, y + length/2, map_data):
-                    # Generate building height based on district type
                     height = self._generate_building_height(block.district_type)
-                    
                     return Building(
                         id=building_id,
                         x=x,
@@ -112,30 +130,28 @@ class BuildingGenerator:
                         district_type=block.district_type,
                         height=height
                     )
-        
         return None
     
     def _conflicts_with_existing(self, new_building: Building, map_data: MapData) -> bool:
         """
-        Check if a new building conflicts with existing buildings.
-        
-        Args:
-            new_building: The building to check
-            map_data: Map data containing existing buildings
-            
-        Returns:
-            True if there's a conflict, False otherwise
+        Check if a new building conflicts with existing buildings, parks, or POIs.
         """
         new_poly = new_building.polygon
-        
-        # Add small buffer to prevent buildings from touching
-        buffer_distance = 5.0
+        buffer_distance = 8.0  # Slightly larger buffer for all features
         buffered_poly = new_poly.buffer(buffer_distance)
-        
+        # Check buildings
         for existing_building in map_data.buildings.values():
             if buffered_poly.intersects(existing_building.polygon):
                 return True
-        
+        # Check parks
+        for park in map_data.parks.values():
+            if hasattr(park, 'polygon') and park.polygon and buffered_poly.intersects(park.polygon):
+                return True
+        # Check POIs (as rectangles)
+        for poi in map_data.pois.values():
+            poi_poly = Point(poi.x + poi.width/2, poi.y + poi.height/2).buffer(max(poi.width, poi.height)/2 + buffer_distance)
+            if buffered_poly.intersects(poi_poly):
+                return True
         return False
     
     def _is_on_land(self, x: float, y: float, map_data: MapData) -> bool:

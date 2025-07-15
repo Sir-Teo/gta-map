@@ -114,6 +114,164 @@ class AdvancedFeaturesGenerator:
         
         print(f"  → Established {len(self.forest_preserves)} nature preserves")
     
+    def generate_plazas(self, map_data: MapData, config):
+        """Generate plazas in downtown and commercial blocks."""
+        import random
+        from shapely.geometry import Point
+        plaza_id = 0
+        for block in map_data.city_blocks.values():
+            if block.district_type in ['downtown', 'commercial']:
+                # Place 1 plaza per block
+                centroid = block.polygon.centroid
+                size = random.uniform(40, 80)
+                plaza_poly = Point(centroid.x, centroid.y).buffer(size)
+                # Check for overlap
+                overlap = False
+                for building in map_data.buildings.values():
+                    if plaza_poly.intersects(building.polygon):
+                        overlap = True
+                        break
+                for park in map_data.parks.values():
+                    if hasattr(park, 'polygon') and park.polygon and plaza_poly.intersects(park.polygon):
+                        overlap = True
+                        break
+                if not overlap:
+                    park = Park(
+                        id=f"plaza_{plaza_id}",
+                        name=f"Plaza {plaza_id+1}",
+                        polygon=plaza_poly,
+                        park_type="plaza",
+                        color="#FFD700"
+                    )
+                    park.center = (centroid.x, centroid.y)
+                    map_data.add_park(park)
+                    plaza_id += 1
+    def generate_playgrounds(self, map_data: MapData, config):
+        """Generate playgrounds in residential blocks."""
+        import random
+        from shapely.geometry import Point
+        playground_id = 0
+        for block in map_data.city_blocks.values():
+            if block.district_type == 'residential':
+                centroid = block.polygon.centroid
+                size = random.uniform(20, 40)
+                playground_poly = Point(centroid.x, centroid.y).buffer(size)
+                overlap = False
+                for building in map_data.buildings.values():
+                    if playground_poly.intersects(building.polygon):
+                        overlap = True
+                        break
+                for park in map_data.parks.values():
+                    if hasattr(park, 'polygon') and park.polygon and playground_poly.intersects(park.polygon):
+                        overlap = True
+                        break
+                if not overlap:
+                    park = Park(
+                        id=f"playground_{playground_id}",
+                        name=f"Playground {playground_id+1}",
+                        polygon=playground_poly,
+                        park_type="playground",
+                        color="#FF69B4"
+                    )
+                    park.center = (centroid.x, centroid.y)
+                    map_data.add_park(park)
+                    playground_id += 1
+    def generate_sports_fields(self, map_data: MapData, config):
+        """Generate sports fields in suburban blocks."""
+        import random
+        from shapely.geometry import Point
+        field_id = 0
+        for block in map_data.city_blocks.values():
+            if block.district_type == 'suburban':
+                centroid = block.polygon.centroid
+                size = random.uniform(30, 60)
+                field_poly = Point(centroid.x, centroid.y).buffer(size)
+                overlap = False
+                for building in map_data.buildings.values():
+                    if field_poly.intersects(building.polygon):
+                        overlap = True
+                        break
+                for park in map_data.parks.values():
+                    if hasattr(park, 'polygon') and park.polygon and field_poly.intersects(park.polygon):
+                        overlap = True
+                        break
+                if not overlap:
+                    park = Park(
+                        id=f"sports_field_{field_id}",
+                        name=f"Sports Field {field_id+1}",
+                        polygon=field_poly,
+                        park_type="sports_field",
+                        color="#32CD32"
+                    )
+                    park.center = (centroid.x, centroid.y)
+                    map_data.add_park(park)
+                    field_id += 1
+    def generate_bus_stops(self, map_data: MapData, config):
+        """Generate bus stops near POIs and parks."""
+        import random
+        from shapely.geometry import Point
+        bus_stop_id = 0
+        for poi in map_data.pois.values():
+            center = (poi.x + poi.width/2, poi.y + poi.height/2)
+            # Place bus stop within 30 units
+            angle = random.uniform(0, 2 * 3.14159)
+            x = center[0] + 30 * math.cos(angle)
+            y = center[1] + 30 * math.sin(angle)
+            bus_stop_poly = Point(x, y).buffer(8)
+            overlap = False
+            for building in map_data.buildings.values():
+                if bus_stop_poly.intersects(building.polygon):
+                    overlap = True
+                    break
+            for park in map_data.parks.values():
+                if hasattr(park, 'polygon') and park.polygon and bus_stop_poly.intersects(park.polygon):
+                    overlap = True
+                    break
+            if not overlap:
+                park = Park(
+                    id=f"bus_stop_{bus_stop_id}",
+                    name=f"Bus Stop {bus_stop_id+1}",
+                    polygon=bus_stop_poly,
+                    park_type="bus_stop",
+                    color="#1E90FF"
+                )
+                park.center = (x, y)
+                map_data.add_park(park)
+                bus_stop_id += 1
+        # Also add bus stops near large parks
+        for park in map_data.parks.values():
+            if hasattr(park, 'polygon') and park.polygon and park.polygon.area > 3000:
+                centroid = park.polygon.centroid
+                angle = random.uniform(0, 2 * 3.14159)
+                x = centroid.x + 30 * math.cos(angle)
+                y = centroid.y + 30 * math.sin(angle)
+                bus_stop_poly = Point(x, y).buffer(8)
+                overlap = False
+                for building in map_data.buildings.values():
+                    if bus_stop_poly.intersects(building.polygon):
+                        overlap = True
+                        break
+                for other_park in map_data.parks.values():
+                    if other_park is not park and hasattr(other_park, 'polygon') and other_park.polygon and bus_stop_poly.intersects(other_park.polygon):
+                        overlap = True
+                        break
+                if not overlap:
+                    new_park = Park(
+                        id=f"bus_stop_{bus_stop_id}",
+                        name=f"Bus Stop {bus_stop_id+1}",
+                        polygon=bus_stop_poly,
+                        park_type="bus_stop",
+                        color="#1E90FF"
+                    )
+                    new_park.center = (x, y)
+                    map_data.add_park(new_park)
+                    bus_stop_id += 1
+    def generate_all_city_features(self, map_data: MapData, config):
+        self.generate_plazas(map_data, config)
+        self.generate_playgrounds(map_data, config)
+        self.generate_sports_fields(map_data, config)
+        self.generate_bus_stops(map_data, config)
+    
     def _generate_national_parks(self, map_data: MapData, config):
         """Generate large national parks in scenic areas."""
         
@@ -582,16 +740,31 @@ class AdvancedFeaturesGenerator:
         try:
             polygon = Polygon(vertices)
             if polygon.is_valid and polygon.area > 2000:
-                return Park(
+                # Check for overlap with existing buildings, parks, POIs
+                buffer_poly = polygon.buffer(8.0)
+                for building in map_data.buildings.values():
+                    if buffer_poly.intersects(building.polygon):
+                        return None
+                for park in map_data.parks.values():
+                    if hasattr(park, 'polygon') and park.polygon and buffer_poly.intersects(park.polygon):
+                        return None
+                for poi in map_data.pois.values():
+                    poi_poly = Point(poi.x + poi.width/2, poi.y + poi.height/2).buffer(max(poi.width, poi.height)/2 + 8.0)
+                    if buffer_poly.intersects(poi_poly):
+                        return None
+                # Store park center for proximity checks
+                park_center = (park_center_x, park_center_y)
+                park = Park(
                     id=park_id,
                     name=f"City Park {park_id.split('_')[-1]}",
                     polygon=polygon,
                     park_type="urban",
                     color="#32CD32"
                 )
+                park.center = park_center
+                return park
         except Exception:
             pass
-        
         return None
     
     def _find_small_park_location(self, map_data: MapData) -> Optional[Tuple[float, float]]:
@@ -700,7 +873,18 @@ class AdvancedFeaturesGenerator:
             y = random.uniform(miny, maxy)
             
             if district.polygon.contains(Point(x, y)):
-                # Check if location meets POI requirements
+                # Check for overlap with buildings, parks, POIs
+                poi_poly = Point(x, y).buffer(12.0)
+                for building in map_data.buildings.values():
+                    if poi_poly.intersects(building.polygon):
+                        continue
+                for park in map_data.parks.values():
+                    if hasattr(park, 'polygon') and park.polygon and poi_poly.intersects(park.polygon):
+                        continue
+                for poi in map_data.pois.values():
+                    other_poi_poly = Point(poi.x + poi.width/2, poi.y + poi.height/2).buffer(max(poi.width, poi.height)/2 + 12.0)
+                    if poi_poly.intersects(other_poi_poly):
+                        continue
                 if self._check_poi_requirements(map_data, (x, y), poi_type, config):
                     return (x, y)
         

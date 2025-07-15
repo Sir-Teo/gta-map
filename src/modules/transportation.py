@@ -1920,99 +1920,90 @@ class AdvancedTransportationGenerator:
         """Create an organic street path with natural curves."""
         import math
         import random
-        
         # Create base path with natural curves
         distance = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
-        num_points = max(4, int(distance / 120))  # Increased spacing from 80 to 120
-        
+        num_points = max(6, int(distance / 80))  # More points for smoother curves
         points = [start]
-        
         for i in range(1, num_points):
             t = i / num_points
-            
-            # Linear interpolation
             base_x = start[0] + (end[0] - start[0]) * t
             base_y = start[1] + (end[1] - start[1]) * t
-            
-            # Add organic curves with more natural variation
-            curve_amplitude = min(40, distance * 0.15)  # Increased from 30 to 40
-            curve_x = math.sin(t * math.pi * 1.8) * curve_amplitude * 0.6  # More varied frequency
-            curve_y = math.sin(t * math.pi * 1.2 + math.pi/4) * curve_amplitude * 0.8  # Different phase
-            
-            # Add terrain influence with more weight
+            # Stronger, more varied curves
+            curve_amplitude = min(60, distance * 0.22)  # More pronounced
+            curve_x = math.sin(t * math.pi * 2.2) * curve_amplitude * 0.8
+            curve_y = math.sin(t * math.pi * 1.7 + math.pi/4) * curve_amplitude * 0.9
+            # More terrain influence
             terrain_influence = self._get_terrain_influence(map_data, (base_x, base_y))
-            terrain_x = math.cos(terrain_influence) * curve_amplitude * 0.5  # Increased from 0.3 to 0.5
-            terrain_y = math.sin(terrain_influence) * curve_amplitude * 0.5
-            
-            # Add some randomness for natural variation
-            random_x = (random.random() - 0.5) * curve_amplitude * 0.3
-            random_y = (random.random() - 0.5) * curve_amplitude * 0.3
-            
-            # Combine all influences
+            terrain_x = math.cos(terrain_influence) * curve_amplitude * 0.7
+            terrain_y = math.sin(terrain_influence) * curve_amplitude * 0.7
+            # More randomness
+            random_x = (random.random() - 0.5) * curve_amplitude * 0.5
+            random_y = (random.random() - 0.5) * curve_amplitude * 0.5
             final_x = base_x + curve_x + terrain_x + random_x
             final_y = base_y + curve_y + terrain_y + random_y
-            
-            # Ensure point is within district
+            from shapely.geometry import Point
             if district.polygon.contains(Point(final_x, final_y)):
                 points.append((final_x, final_y))
-        
         points.append(end)
-        
-        # Apply stronger smoothing for more natural curves
-        return self._apply_organic_smoothing(points, 'local')
-    
+        # Stronger smoothing for city roads
+        return self._apply_organic_smoothing(points, 'city')
+
     def _create_organic_loop_road(self, map_data: MapData, district, loop_index: int) -> List[Tuple[float, float]]:
-        """Create an organic loop road within a district."""
         import math
         import random
         from shapely.geometry import Point
-        
         minx, miny, maxx, maxy = district.polygon.bounds
         district_center = district.polygon.centroid
-        
-        # Create elliptical loop with organic variation
         center_x = district_center.x
         center_y = district_center.y
-        radius_x = (maxx - minx) * 0.3
-        radius_y = (maxy - miny) * 0.3
-        
-        # Adjust radius for multiple loops
+        radius_x = (maxx - minx) * 0.32
+        radius_y = (maxy - miny) * 0.32
         if loop_index > 0:
             radius_x *= 0.7
             radius_y *= 0.7
-        
         points = []
-        num_points = 16
-        
+        num_points = 22  # More points for smoother loops
         for i in range(num_points):
             angle = (i / num_points) * 2 * math.pi
-            
-            # Base elliptical path
             base_x = center_x + radius_x * math.cos(angle)
             base_y = center_y + radius_y * math.sin(angle)
-            
-            # Add organic variation
-            variation_amplitude = min(20, radius_x * 0.1)
-            variation_x = math.sin(angle * 3) * variation_amplitude
-            variation_y = math.cos(angle * 2.5) * variation_amplitude
-            
-            # Add terrain influence
+            variation_amplitude = min(30, radius_x * 0.18)
+            variation_x = math.sin(angle * 3.5) * variation_amplitude
+            variation_y = math.cos(angle * 2.8) * variation_amplitude
             terrain_influence = self._get_terrain_influence(map_data, (base_x, base_y))
-            terrain_x = math.cos(terrain_influence) * variation_amplitude * 0.5
-            terrain_y = math.sin(terrain_influence) * variation_amplitude * 0.5
-            
-            final_x = base_x + variation_x + terrain_x
-            final_y = base_y + variation_y + terrain_y
-            
-            # Ensure point is within district
+            terrain_x = math.cos(terrain_influence) * variation_amplitude * 0.7
+            terrain_y = math.sin(terrain_influence) * variation_amplitude * 0.7
+            random_x = (random.random() - 0.5) * variation_amplitude * 0.7
+            random_y = (random.random() - 0.5) * variation_amplitude * 0.7
+            final_x = base_x + variation_x + terrain_x + random_x
+            final_y = base_y + variation_y + terrain_y + random_y
             if district.polygon.contains(Point(final_x, final_y)):
                 points.append((final_x, final_y))
-        
-        # Close the loop
         if points and len(points) > 2:
             points.append(points[0])
-        
-        return self._apply_organic_smoothing(points, 'local')
+        return self._apply_organic_smoothing(points, 'city')
+
+    def _apply_organic_smoothing(self, points: list, road_type: str) -> list:
+        """Apply organic smoothing to road points."""
+        if len(points) < 3:
+            return points
+        smoothed = [points[0]]
+        # Stronger smoothing for city roads
+        if road_type == 'city':
+            weight = 0.75
+        elif road_type == 'arterial':
+            weight = 0.4
+        else:
+            weight = 0.6
+        for i in range(1, len(points) - 1):
+            prev = points[i - 1]
+            curr = points[i]
+            next_point = points[i + 1]
+            smoothed_x = curr[0] * (1 - weight) + (prev[0] + next_point[0]) / 2 * weight
+            smoothed_y = curr[1] * (1 - weight) + (prev[1] + next_point[1]) / 2 * weight
+            smoothed.append((smoothed_x, smoothed_y))
+        smoothed.append(points[-1])
+        return smoothed
     
     def _find_natural_arterial_starts(self, map_data: MapData) -> list:
         """Find natural starting points for arterial roads."""
@@ -2185,23 +2176,6 @@ class AdvancedTransportationGenerator:
                 map_path.append((mid_x, mid_y))
         return map_path
 
-    def _apply_organic_smoothing(self, points: list, road_type: str) -> list:
-        """Apply organic smoothing to road points."""
-        if len(points) < 3:
-            return points
-        smoothed = [points[0]]
-        for i in range(1, len(points) - 1):
-            prev = points[i - 1]
-            curr = points[i]
-            next_point = points[i + 1]
-            # Calculate smoothed point using weighted average with more weight on neighbors
-            weight = 0.4 if road_type == 'arterial' else 0.6
-            smoothed_x = curr[0] * (1 - weight) + (prev[0] + next_point[0]) / 2 * weight
-            smoothed_y = curr[1] * (1 - weight) + (prev[1] + next_point[1]) / 2 * weight
-            smoothed.append((smoothed_x, smoothed_y))
-        smoothed.append(points[-1])
-        return smoothed
-
     def _create_secondary_arterials(self, map_data: MapData, config: TransportationConfig):
         """Create secondary arterial roads that branch off main arterials."""
         if not self.arterial_spine:
@@ -2304,6 +2278,157 @@ class AdvancedTransportationGenerator:
                     x = max(50, min(map_data.width - 50, avoid_x))
                     y = max(50, min(map_data.height - 50, avoid_y))
         return (x, y)
+
+    def connect_features_to_roads(self, map_data: MapData, config: TransportationConfig):
+        """
+        For each building, park, and POI in each city block, ensure it is connected to the nearest road.
+        If not within 30 units of a road, generate a connector road.
+        Group nearby features to share connectors, avoid obstacles, and connect to building edges.
+        """
+        from shapely.geometry import Point, LineString
+        import math
+        connector_id = 0
+        all_roads = list(map_data.roads.values())
+        # Helper to check if a feature is close to any road
+        def is_connected(feature_center):
+            for road in all_roads:
+                for pt in road.points:
+                    if ((pt[0] - feature_center[0]) ** 2 + (pt[1] - feature_center[1]) ** 2) ** 0.5 < 30:
+                        return True
+            return False
+        # Helper to find nearest road point
+        def nearest_road_point(feature_center):
+            min_dist = float('inf')
+            nearest = None
+            for road in all_roads:
+                for pt in road.points:
+                    dist = ((pt[0] - feature_center[0]) ** 2 + (pt[1] - feature_center[1]) ** 2) ** 0.5
+                    if dist < min_dist:
+                        min_dist = dist
+                        nearest = pt
+            return nearest
+        # Helper to find a building's edge closest to a point
+        def building_edge_point(building, target):
+            # Rectangle edges
+            corners = [
+                (building.x, building.y),
+                (building.x + building.width, building.y),
+                (building.x + building.width, building.y + building.length),
+                (building.x, building.y + building.length)
+            ]
+            min_dist = float('inf')
+            best = None
+            for i in range(4):
+                p1 = corners[i]
+                p2 = corners[(i+1)%4]
+                line = LineString([p1, p2])
+                proj = line.interpolate(line.project(Point(target)))
+                dist = Point(target).distance(proj)
+                if dist < min_dist:
+                    min_dist = dist
+                    best = (proj.x, proj.y)
+            return best
+        # Group features by proximity (within 40 units)
+        def group_features(centers):
+            groups = []
+            used = set()
+            for i, c1 in enumerate(centers):
+                if i in used:
+                    continue
+                group = [i]
+                for j, c2 in enumerate(centers):
+                    if i != j and j not in used:
+                        if ((c1[0] - c2[0])**2 + (c1[1] - c2[1])**2) ** 0.5 < 40:
+                            group.append(j)
+                            used.add(j)
+                used.add(i)
+                groups.append(group)
+            return groups
+        # Collect all feature centers
+        building_centers = []
+        building_refs = []
+        for building in map_data.buildings.values():
+            # Use edge closest to nearest road, not center
+            road_pt = nearest_road_point((building.x + building.width/2, building.y + building.length/2))
+            if road_pt:
+                edge_pt = building_edge_point(building, road_pt)
+            else:
+                edge_pt = (building.x + building.width/2, building.y + building.length/2)
+            building_centers.append(edge_pt)
+            building_refs.append(building)
+        park_centers = []
+        park_refs = []
+        for park in map_data.parks.values():
+            if hasattr(park, 'center'):
+                center = park.center
+            elif hasattr(park, 'polygon') and park.polygon:
+                center = (park.polygon.centroid.x, park.polygon.centroid.y)
+            else:
+                continue
+            park_centers.append(center)
+            park_refs.append(park)
+        poi_centers = []
+        poi_refs = []
+        for poi in map_data.pois.values():
+            center = (poi.x + poi.width/2, poi.y + poi.height/2)
+            poi_centers.append(center)
+            poi_refs.append(poi)
+        # Group and connect buildings
+        for group in group_features(building_centers):
+            group_pts = [building_centers[i] for i in group]
+            # Use group centroid as connector start
+            group_center = (sum(p[0] for p in group_pts)/len(group_pts), sum(p[1] for p in group_pts)/len(group_pts))
+            if not is_connected(group_center):
+                road_pt = nearest_road_point(group_center)
+                if road_pt:
+                    # Path from group center to road
+                    connector_points = self._create_organic_path(map_data, group_center, road_pt, 'local')
+                    if connector_points and len(connector_points) > 1:
+                        connector_road = Road(
+                            id=f"connector_building_{connector_id}",
+                            points=connector_points,
+                            road_type='connector_building',
+                            width=config.road_styles['local']['width'] * 0.7,
+                            color='#bbbbbb'
+                        )
+                        map_data.add_road(connector_road)
+                        connector_id += 1
+        # Group and connect parks
+        for group in group_features(park_centers):
+            group_pts = [park_centers[i] for i in group]
+            group_center = (sum(p[0] for p in group_pts)/len(group_pts), sum(p[1] for p in group_pts)/len(group_pts))
+            if not is_connected(group_center):
+                road_pt = nearest_road_point(group_center)
+                if road_pt:
+                    connector_points = self._create_organic_path(map_data, group_center, road_pt, 'local')
+                    if connector_points and len(connector_points) > 1:
+                        connector_road = Road(
+                            id=f"connector_park_{connector_id}",
+                            points=connector_points,
+                            road_type='connector_park',
+                            width=config.road_styles['local']['width'] * 0.7,
+                            color='#aaddaa'
+                        )
+                        map_data.add_road(connector_road)
+                        connector_id += 1
+        # Group and connect POIs
+        for group in group_features(poi_centers):
+            group_pts = [poi_centers[i] for i in group]
+            group_center = (sum(p[0] for p in group_pts)/len(group_pts), sum(p[1] for p in group_pts)/len(group_pts))
+            if not is_connected(group_center):
+                road_pt = nearest_road_point(group_center)
+                if road_pt:
+                    connector_points = self._create_organic_path(map_data, group_center, road_pt, 'local')
+                    if connector_points and len(connector_points) > 1:
+                        connector_road = Road(
+                            id=f"connector_poi_{connector_id}",
+                            points=connector_points,
+                            road_type='connector_poi',
+                            width=config.road_styles['local']['width'] * 0.7,
+                            color='#aaaaff'
+                        )
+                        map_data.add_road(connector_road)
+                        connector_id += 1
 
 
 # Backward compatibility with existing system

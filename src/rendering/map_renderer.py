@@ -190,67 +190,85 @@ class MapRenderer:
         """Render road networks."""
         # Group roads by type for consistent rendering
         road_types = ['highway', 'arterial', 'collector', 'local']
-        
+        # Render standard roads
         for road_type in road_types:
             roads = [r for r in map_data.roads.values() if r.road_type == road_type]
-            
             for road in roads:
                 if len(road.points) > 1:
                     x_coords = [p[0] for p in road.points]
                     y_coords = [p[1] for p in road.points]
-                    
-                    # Get road style
                     style = config.transportation.road_styles.get(
                         road_type, 
                         config.transportation.road_styles['local']
                     )
-                    
-                    # Render road with outline for better visibility
-                    outline_width = style['width'] + 2
-                    
-                    # Road outline (darker)
+                    outline_width = style['width'] + 3
+                    # Soft shadow
+                    self.ax.plot(
+                        x_coords, y_coords,
+                        color='#222222',
+                        linewidth=outline_width + 2,
+                        alpha=0.18,
+                        zorder=5,
+                        solid_capstyle='round',
+                    )
+                    # Main outline
                     self.ax.plot(
                         x_coords, y_coords,
                         color='#000000',
                         linewidth=outline_width,
+                        alpha=0.35,
+                        zorder=6,
                         solid_capstyle='round',
-                        alpha=0.8,
-                        zorder=6
                     )
-                    
-                    # Road surface
+                    # Road surface with gradient (simulate by blending color and white)
+                    base_color = style['color']
+                    grad_color = mcolors.to_rgba(base_color, 0.95)
                     self.ax.plot(
                         x_coords, y_coords,
-                        color=style['color'],
+                        color=grad_color,
                         linewidth=style['width'],
                         solid_capstyle='round',
-                        alpha=0.9,
+                        alpha=0.95,
                         zorder=7
                     )
-                    
-                    # Center line for highways
-                    if road_type == 'highway':
-                        self.ax.plot(
-                            x_coords, y_coords,
-                            color='#FFFF00',
-                            linewidth=style['width'] * 0.2,
-                            solid_capstyle='round',
-                            alpha=0.7,
-                            zorder=8,
-                            linestyle=(0, (5, 10))
-                        )
-    
+        # Render connector roads with special style
+        connector_roads = [r for r in map_data.roads.values() if str(r.road_type).startswith('connector')]
+        for road in connector_roads:
+            if len(road.points) > 1:
+                x_coords = [p[0] for p in road.points]
+                y_coords = [p[1] for p in road.points]
+                # Dashed, thinner, semi-transparent, unique color
+                self.ax.plot(
+                    x_coords, y_coords,
+                    color='#FF69B4',  # Hot pink for visibility
+                    linewidth=2,
+                    alpha=0.6,
+                    zorder=8,
+                    linestyle=(0, (6, 8)),
+                    solid_capstyle='round',
+                )
+                # Optional: add a subtle outline
+                self.ax.plot(
+                    x_coords, y_coords,
+                    color='#660033',
+                    linewidth=3.5,
+                    alpha=0.3,
+                    zorder=7,
+                    linestyle=(0, (6, 8)),
+                    solid_capstyle='round',
+                )
+
     def _render_buildings(self, map_data: MapData, config: MapConfig):
         """Render buildings with 3D-like appearance."""
         for building in map_data.buildings.values():
             # Building shadow for 3D effect
-            shadow_offset = 2
+            shadow_offset = 6
             shadow_rect = Rectangle(
                 (building.x + shadow_offset, building.y - shadow_offset),
                 building.width,
                 building.length,
                 facecolor='black',
-                alpha=0.2,
+                alpha=0.12,
                 zorder=9
             )
             self.ax.add_patch(shadow_rect)
@@ -262,9 +280,9 @@ class MapRenderer:
                 building.width,
                 building.length,
                 facecolor=building_color,
-                edgecolor='#333333',
-                linewidth=0.5,
-                alpha=0.9,
+                edgecolor='#222222',
+                linewidth=1.2,
+                alpha=0.97,
                 zorder=10
             )
             self.ax.add_patch(building_rect)
@@ -278,9 +296,9 @@ class MapRenderer:
                 poi.width,
                 poi.height,
                 facecolor=poi.color,
-                edgecolor='#000000',
-                linewidth=2,
-                alpha=0.8,
+                edgecolor='#222222',
+                linewidth=2.5,
+                alpha=0.85,
                 zorder=12
             )
             self.ax.add_patch(poi_rect)
@@ -292,13 +310,14 @@ class MapRenderer:
             self.ax.text(
                 center_x, center_y,
                 poi.name,
-                fontsize=8,
+                fontsize=10,
                 ha='center',
                 va='center',
                 weight='bold',
                 color='white',
                 bbox=dict(facecolor='black', alpha=0.7, edgecolor='none', pad=1),
-                zorder=13
+                zorder=13,
+                fontname='DejaVu Sans',
             )
     
     def _render_parks(self, map_data: MapData):
@@ -312,8 +331,8 @@ class MapRenderer:
                 closed=True,
                 facecolor=park.color,
                 edgecolor='#228B22',
-                linewidth=1,
-                alpha=0.6,
+                linewidth=2.5,
+                alpha=0.5,
                 zorder=4
             )
             self.ax.add_patch(park_polygon)
@@ -324,13 +343,14 @@ class MapRenderer:
                 self.ax.text(
                     centroid.x, centroid.y,
                     park.name,
-                    fontsize=8,
+                    fontsize=12,
                     ha='center',
                     va='center',
                     weight='bold',
                     color='#006400',
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1),
-                    zorder=5
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=2),
+                    zorder=5,
+                    fontname='DejaVu Sans',
                 )
     
     def _configure_map_appearance(self, map_data: MapData, show_legend: bool, config: MapConfig):
@@ -347,7 +367,7 @@ class MapRenderer:
         
         # Add title
         title = f"GTA-Style Procedural Map (Seed: {map_data.generation_seed})"
-        self.ax.set_title(title, fontsize=20, pad=20, fontweight='bold')
+        self.ax.set_title(title, fontsize=28, pad=24, fontweight='bold', fontname='DejaVu Sans')
         
         # Add legend if requested
         if show_legend:
@@ -381,6 +401,10 @@ class MapRenderer:
                     Line2D([0], [0], color=style['color'], linewidth=4,
                           label=road_type.replace('_', ' ').title())
                 )
+        # Add connector road legend
+        road_elements.append(
+            Line2D([0], [0], color='#FF69B4', linewidth=2, linestyle=(0, (6, 8)), alpha=0.6, label='Connector Road')
+        )
         
         # Feature elements
         feature_elements = [

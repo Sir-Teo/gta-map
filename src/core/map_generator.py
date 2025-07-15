@@ -99,6 +99,9 @@ class MapGenerator:
             step_function()
             print(f"✓ {step_name} completed")
         
+        # After all features, connect features to roads
+        if self.transportation_generator and hasattr(self.transportation_generator, 'connect_features_to_roads'):
+            self.transportation_generator.connect_features_to_roads(self.map_data, self.config.transportation)
         # Finalize map data
         generation_time = (datetime.now() - start_time).total_seconds()
         self.map_data.metadata.update({
@@ -176,12 +179,14 @@ class MapGenerator:
         self.building_generator.populate_city_blocks(self.map_data, self.config.buildings)
     
     def _generate_features(self):
-        """Generate POIs, landmarks, and parks."""
+        """Generate POIs, landmarks, and parks, then new city features."""
         if not self.features_generator:
             raise ValueError("Features generator not set")
-        
         self.features_generator.generate_parks(self.map_data, self.config)
         self.features_generator.generate_pois(self.map_data, self.config.pois)
+        # Add new city features (plazas, playgrounds, sports fields, bus stops)
+        if hasattr(self.features_generator, 'generate_all_city_features'):
+            self.features_generator.generate_all_city_features(self.map_data, self.config)
     
     def get_generation_progress(self) -> Dict[str, Any]:
         """Get current generation progress information."""
