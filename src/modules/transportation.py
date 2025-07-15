@@ -62,12 +62,18 @@ class AdvancedTransportationGenerator:
         self.major_highways = []
         self.elevation_cost_cache = {}
         self.arterial_spine = []
+        self.road_density_map = {}  # Track road density to prevent overmapping
+        self.mountain_roads = []
+        self.park_paths = []
     
     def generate_highway_network(self, map_data: MapData, config: TransportationConfig):
         """
         Generate a network of highways connecting major areas with elevation awareness.
         """
         print("  → Generating highway network...")
+        
+        # Initialize road density tracking
+        self._initialize_road_density_map(map_data)
         
         # Find major cities/districts for highway connections
         connection_points = self._find_highway_connection_points(map_data)
@@ -100,13 +106,620 @@ class AdvancedTransportationGenerator:
         # Generate collector roads between arterials (proper hierarchy)
         self._generate_collector_roads(map_data, config)
         
-        # Generate local roads in districts with organic patterns (much less dense)
-        self._generate_organic_local_roads(map_data, config)
-        
         # Generate rural roads for less developed areas
         self._generate_rural_roads(map_data, config)
         
+        # Generate organic local roads within districts
+        self._generate_organic_local_roads(map_data, config)
+        
         print("  → Local road network complete")
+    
+    def generate_park_paths(self, map_data: MapData, config: TransportationConfig):
+        """
+        Generate walking paths, hiking trails, and scenic routes in parks.
+        """
+        print("  → Generating park paths and trails...")
+        
+        for park in map_data.parks.values():
+            if hasattr(park, 'polygon') and park.polygon:
+                self._generate_park_internal_paths(map_data, park, config)
+        
+        print(f"  → Generated paths for {len(map_data.parks)} parks")
+    
+    def generate_mountain_roads(self, map_data: MapData, config: TransportationConfig):
+        """
+        Generate scenic mountain roads with switchbacks and viewpoints.
+        """
+        print("  → Generating mountain roads and scenic routes...")
+        
+        # Find mountain areas
+        mountain_areas = self._find_mountain_areas(map_data)
+        
+        # Generate scenic mountain roads
+        for i, mountain_area in enumerate(mountain_areas):
+            self._generate_scenic_mountain_road(map_data, mountain_area, f"mountain_scenic_{i}", config)
+        
+        # Generate mountain access roads
+        self._generate_mountain_access_roads(map_data, config)
+        
+        print(f"  → Generated {len(self.mountain_roads)} mountain roads")
+    
+    def _initialize_road_density_map(self, map_data: MapData):
+        """Initialize the road density tracking map."""
+        self.road_density_map = {}
+        grid_size = 100  # 100x100 unit cells for density tracking
+        
+        for y in range(0, map_data.height, grid_size):
+            for x in range(0, map_data.width, grid_size):
+                self.road_density_map[(x, y)] = 0
+    
+    def _check_road_density(self, point: Tuple[float, float], road_type: str) -> bool:
+        """Check if adding a road at this point would cause overmapping."""
+        grid_size = 100
+        grid_x = int(point[0] // grid_size) * grid_size
+        grid_y = int(point[1] // grid_size) * grid_size
+        
+        current_density = self.road_density_map.get((grid_x, grid_y), 0)
+        
+        # Define density limits by road type
+        density_limits = {
+            'highway': 1,
+            'arterial': 2,
+            'collector': 3,
+            'local': 6,
+            'rural': 4,
+            'path': 8,
+            'mountain': 2
+        }
+        
+        limit = density_limits.get(road_type, 4)
+        return current_density < limit
+    
+    def _update_road_density(self, points: List[Tuple[float, float]], road_type: str):
+        """Update road density map when a road is added."""
+        grid_size = 100
+        
+        for point in points:
+            grid_x = int(point[0] // grid_size) * grid_size
+            grid_y = int(point[1] // grid_size) * grid_size
+            
+            if (grid_x, grid_y) in self.road_density_map:
+                self.road_density_map[(grid_x, grid_y)] += 1
+    
+    def _find_mountain_areas(self, map_data: MapData) -> List[Tuple[float, float]]:
+        """Find suitable mountain areas for scenic roads."""
+        mountain_areas = []
+        
+        for y in range(0, map_data.grid_height, 5):
+            for x in range(0, map_data.grid_width, 5):
+                if (map_data.heightmap[y, x] > 0.65 and 
+                    map_data.land_mask[y, x]):
+                    
+                    # Check if this is a good mountain area (high elevation, accessible)
+                    world_x = x * map_data.grid_size
+                    world_y = y * map_data.grid_size
+                    
+                    if self._is_good_mountain_area(map_data, world_x, world_y):
+                        mountain_areas.append((world_x, world_y))
+        
+        return mountain_areas[:6]  # Limit to 6 mountain areas
+    
+    def _is_good_mountain_area(self, map_data: MapData, x: float, y: float) -> bool:
+        """Check if a mountain area is suitable for scenic roads."""
+        # Check if there's a reasonable path to lower elevation
+        nearby_lower = False
+        search_radius = 200
+        
+        for dy in range(-search_radius, search_radius, 50):
+            for dx in range(-search_radius, search_radius, 50):
+                check_x = x + dx
+                check_y = y + dy
+                
+                grid_x = int(check_x / map_data.grid_size)
+                grid_y = int(check_y / map_data.grid_size)
+                
+                if (0 <= grid_x < map_data.grid_width and 
+                    0 <= grid_y < map_data.grid_height and
+                    map_data.heightmap[grid_y, grid_x] < 0.5):
+                    nearby_lower = True
+                    break
+        
+        return nearby_lower
+    
+    def _generate_scenic_mountain_road(self, map_data: MapData, mountain_center: Tuple[float, float], 
+                                     road_id: str, config: TransportationConfig):
+        """Generate a scenic mountain road with switchbacks."""
+        if not self._check_road_density(mountain_center, 'mountain'):
+            return
+        
+        # Find start point at lower elevation
+        start_point = self._find_mountain_road_start(map_data, mountain_center)
+        if not start_point:
+            return
+        
+        # Generate switchback path to mountain peak
+        switchback_points = self._create_switchback_path(map_data, start_point, mountain_center)
+        
+        if len(switchback_points) > 3:
+            mountain_road = Road(
+                id=road_id,
+                points=switchback_points,
+                road_type='mountain',
+                width=config.road_styles['rural']['width'],
+                color='#8B4513'
+            )
+            map_data.add_road(mountain_road)
+            self.mountain_roads.append(mountain_road)
+            self._update_road_density(switchback_points, 'mountain')
+    
+    def _find_mountain_road_start(self, map_data: MapData, mountain_center: Tuple[float, float]) -> Optional[Tuple[float, float]]:
+        """Find a good starting point for a mountain road."""
+        # Look for existing roads near the mountain
+        for road in map_data.roads.values():
+            if not road.points:
+                continue
+                
+            for point in road.points:
+                distance = math.sqrt((point[0] - mountain_center[0])**2 + (point[1] - mountain_center[1])**2)
+                if distance < 300:  # Within 300 units
+                    return point
+        
+        # If no existing road, find a suitable point at lower elevation
+        for radius in range(100, 400, 50):
+            for angle in range(0, 360, 45):
+                x = mountain_center[0] + radius * math.cos(math.radians(angle))
+                y = mountain_center[1] + radius * math.sin(math.radians(angle))
+                
+                grid_x = int(x / map_data.grid_size)
+                grid_y = int(y / map_data.grid_size)
+                
+                if (0 <= grid_x < map_data.grid_width and 
+                    0 <= grid_y < map_data.grid_height and
+                    map_data.land_mask[grid_y, grid_x] and
+                    map_data.heightmap[grid_y, grid_x] < 0.5):
+                    return (x, y)
+        
+        return None
+    
+    def _create_switchback_path(self, map_data: MapData, start: Tuple[float, float], 
+                               end: Tuple[float, float]) -> List[Tuple[float, float]]:
+        """Create a switchback path up a mountain."""
+        path = [start]
+        current = start
+        
+        total_distance = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+        segments = max(4, int(total_distance / 100))
+        
+        for i in range(1, segments + 1):
+            # Calculate target elevation for this segment
+            t = i / segments
+            target_elevation = self._get_elevation_at_point(map_data, start) + \
+                             t * (self._get_elevation_at_point(map_data, end) - self._get_elevation_at_point(map_data, start))
+            
+            # Create switchback point
+            switchback_point = self._find_switchback_point(map_data, current, end, target_elevation, i % 2 == 0)
+            
+            if switchback_point:
+                path.append(switchback_point)
+                current = switchback_point
+        
+        path.append(end)
+        return path
+    
+    def _find_switchback_point(self, map_data: MapData, current: Tuple[float, float], 
+                              target: Tuple[float, float], target_elevation: float, 
+                              turn_left: bool) -> Optional[Tuple[float, float]]:
+        """Find a good switchback point."""
+        # Direction towards target
+        dx = target[0] - current[0]
+        dy = target[1] - current[1]
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        if distance == 0:
+            return None
+        
+        # Normalize direction
+        dx /= distance
+        dy /= distance
+        
+        # Create switchback by turning perpendicular
+        if turn_left:
+            perp_dx = -dy
+            perp_dy = dx
+        else:
+            perp_dx = dy
+            perp_dy = -dx
+        
+        # Find point at appropriate elevation
+        for offset in range(50, 150, 25):
+            candidate_x = current[0] + offset * perp_dx
+            candidate_y = current[1] + offset * perp_dy
+            
+            grid_x = int(candidate_x / map_data.grid_size)
+            grid_y = int(candidate_y / map_data.grid_size)
+            
+            if (0 <= grid_x < map_data.grid_width and 
+                0 <= grid_y < map_data.grid_height and
+                map_data.land_mask[grid_y, grid_x]):
+                
+                elevation = map_data.heightmap[grid_y, grid_x]
+                if abs(elevation - target_elevation) < 0.1:
+                    return (candidate_x, candidate_y)
+        
+        return None
+    
+    def _generate_mountain_access_roads(self, map_data: MapData, config: TransportationConfig):
+        """Generate access roads to mountain areas."""
+        access_count = 0
+        
+        # Find mountain areas without road access
+        for y in range(0, map_data.grid_height, 10):
+            for x in range(0, map_data.grid_width, 10):
+                if (map_data.heightmap[y, x] > 0.6 and 
+                    map_data.land_mask[y, x]):
+                    
+                    world_x = x * map_data.grid_size
+                    world_y = y * map_data.grid_size
+                    
+                    # Check if far from existing roads
+                    if self._find_nearest_road_distance(map_data, (world_x, world_y)) > 150:
+                        
+                        # Create access road
+                        access_road = self._create_mountain_access_road(map_data, (world_x, world_y), 
+                                                                      f"mountain_access_{access_count}", config)
+                        if access_road:
+                            map_data.add_road(access_road)
+                            access_count += 1
+                            
+                            if access_count >= 3:  # Limit mountain access roads
+                                break
+    
+    def _create_mountain_access_road(self, map_data: MapData, mountain_point: Tuple[float, float], 
+                                   road_id: str, config: TransportationConfig) -> Optional[Road]:
+        """Create an access road to a mountain area."""
+        # Find nearest existing road
+        nearest_road_point = self._find_nearest_road_point(map_data, mountain_point)
+        
+        if not nearest_road_point:
+            return None
+        
+        # Create terrain-following path
+        path_points = self._create_terrain_following_path(map_data, nearest_road_point, mountain_point)
+        
+        if len(path_points) > 2:
+            return Road(
+                id=road_id,
+                points=path_points,
+                road_type='mountain',
+                width=config.road_styles['rural']['width'],
+                color='#8B4513'
+            )
+        
+        return None
+    
+    def _create_terrain_following_path(self, map_data: MapData, start: Tuple[float, float], 
+                                     end: Tuple[float, float]) -> List[Tuple[float, float]]:
+        """Create a path that follows terrain contours."""
+        path = [start]
+        current = start
+        
+        distance = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+        steps = max(5, int(distance / 80))
+        
+        for i in range(1, steps):
+            t = i / steps
+            
+            # Base interpolation
+            base_x = start[0] + (end[0] - start[0]) * t
+            base_y = start[1] + (end[1] - start[1]) * t
+            
+            # Adjust for terrain
+            adjusted_point = self._adjust_point_for_terrain(map_data, (base_x, base_y), current)
+            
+            if adjusted_point:
+                path.append(adjusted_point)
+                current = adjusted_point
+        
+        path.append(end)
+        return path
+    
+    def _adjust_point_for_terrain(self, map_data: MapData, point: Tuple[float, float], 
+                                 previous: Tuple[float, float]) -> Optional[Tuple[float, float]]:
+        """Adjust a point to follow terrain contours."""
+        grid_x = int(point[0] / map_data.grid_size)
+        grid_y = int(point[1] / map_data.grid_size)
+        
+        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
+            return None
+        
+        if not map_data.land_mask[grid_y, grid_x]:
+            return None
+        
+        current_elevation = map_data.heightmap[grid_y, grid_x]
+        prev_elevation = self._get_elevation_at_point(map_data, previous)
+        
+        # Limit elevation change
+        max_elevation_change = 0.05
+        if abs(current_elevation - prev_elevation) > max_elevation_change:
+            # Find alternative point with gentler slope
+            for offset in range(10, 50, 10):
+                for angle in range(0, 360, 45):
+                    alt_x = point[0] + offset * math.cos(math.radians(angle))
+                    alt_y = point[1] + offset * math.sin(math.radians(angle))
+                    
+                    alt_grid_x = int(alt_x / map_data.grid_size)
+                    alt_grid_y = int(alt_y / map_data.grid_size)
+                    
+                    if (0 <= alt_grid_x < map_data.grid_width and 
+                        0 <= alt_grid_y < map_data.grid_height and
+                        map_data.land_mask[alt_grid_y, alt_grid_x]):
+                        
+                        alt_elevation = map_data.heightmap[alt_grid_y, alt_grid_x]
+                        if abs(alt_elevation - prev_elevation) < max_elevation_change:
+                            return (alt_x, alt_y)
+        
+        return point
+    
+    def _generate_park_internal_paths(self, map_data: MapData, park, config: TransportationConfig):
+        """Generate internal paths within a park."""
+        if not hasattr(park, 'polygon') or not park.polygon:
+            return
+        
+        park_type = getattr(park, 'park_type', 'urban')
+        
+        # Different path patterns for different park types
+        if park_type == 'national':
+            self._generate_national_park_paths(map_data, park, config)
+        elif park_type in ['urban', 'plaza']:
+            self._generate_urban_park_paths(map_data, park, config)
+        else:
+            self._generate_basic_park_paths(map_data, park, config)
+    
+    def _generate_national_park_paths(self, map_data: MapData, park, config: TransportationConfig):
+        """Generate hiking trails and scenic paths in national parks."""
+        center = getattr(park, 'center', park.polygon.centroid)
+        center_point = (center.x if hasattr(center, 'x') else center[0], 
+                       center.y if hasattr(center, 'y') else center[1])
+        
+        # Generate main trail loop
+        main_trail = self._create_park_trail_loop(map_data, park, center_point, 'main')
+        if main_trail:
+            map_data.add_road(main_trail)
+            self.park_paths.append(main_trail)
+        
+        # Generate hiking trails to scenic points
+        scenic_points = self._find_scenic_points_in_park(map_data, park)
+        for i, scenic_point in enumerate(scenic_points[:3]):
+            trail = self._create_park_trail(map_data, park, center_point, scenic_point, f"trail_{i}")
+            if trail:
+                map_data.add_road(trail)
+                self.park_paths.append(trail)
+    
+    def _generate_urban_park_paths(self, map_data: MapData, park, config: TransportationConfig):
+        """Generate walking paths in urban parks."""
+        center = getattr(park, 'center', park.polygon.centroid)
+        center_point = (center.x if hasattr(center, 'x') else center[0], 
+                       center.y if hasattr(center, 'y') else center[1])
+        
+        # Generate main walking path
+        main_path = self._create_park_walking_path(map_data, park, center_point, 'main')
+        if main_path:
+            map_data.add_road(main_path)
+            self.park_paths.append(main_path)
+        
+        # Generate connecting paths
+        if park.polygon.area > 5000:  # Larger parks get more paths
+            for i in range(2):
+                connecting_path = self._create_park_connecting_path(map_data, park, center_point, i)
+                if connecting_path:
+                    map_data.add_road(connecting_path)
+                    self.park_paths.append(connecting_path)
+    
+    def _generate_basic_park_paths(self, map_data: MapData, park, config: TransportationConfig):
+        """Generate basic paths for smaller parks."""
+        center = getattr(park, 'center', park.polygon.centroid)
+        center_point = (center.x if hasattr(center, 'x') else center[0], 
+                       center.y if hasattr(center, 'y') else center[1])
+        
+        # Single main path
+        main_path = self._create_park_walking_path(map_data, park, center_point, 'main')
+        if main_path:
+            map_data.add_road(main_path)
+            self.park_paths.append(main_path)
+    
+    def _create_park_trail_loop(self, map_data: MapData, park, center: Tuple[float, float], 
+                               trail_id: str) -> Optional[Road]:
+        """Create a main trail loop in a park."""
+        bounds = park.polygon.bounds
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+        
+        # Create loop points
+        loop_points = []
+        num_points = 8
+        radius = min(width, height) * 0.3
+        
+        for i in range(num_points):
+            angle = (i / num_points) * 2 * math.pi
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            
+            # Keep within park bounds
+            if park.polygon.contains(Point(x, y)):
+                loop_points.append((x, y))
+        
+        # Close the loop
+        if loop_points:
+            loop_points.append(loop_points[0])
+        
+        if len(loop_points) > 3:
+            return Road(
+                id=f"park_trail_{park.id}_{trail_id}",
+                points=loop_points,
+                road_type='path',
+                width=1.5,
+                color='#8FBC8F'
+            )
+        
+        return None
+    
+    def _create_park_trail(self, map_data: MapData, park, start: Tuple[float, float], 
+                          end: Tuple[float, float], trail_id: str) -> Optional[Road]:
+        """Create a trail between two points in a park."""
+        # Simple path with some natural curves
+        path_points = self._create_natural_park_path(start, end, park)
+        
+        if len(path_points) > 2:
+            return Road(
+                id=f"park_trail_{park.id}_{trail_id}",
+                points=path_points,
+                road_type='path',
+                width=1.0,
+                color='#8FBC8F'
+            )
+        
+        return None
+    
+    def _create_park_walking_path(self, map_data: MapData, park, center: Tuple[float, float], 
+                                 path_id: str) -> Optional[Road]:
+        """Create a walking path in an urban park."""
+        bounds = park.polygon.bounds
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+        
+        # Create curved path
+        path_points = []
+        num_points = 6
+        
+        for i in range(num_points):
+            t = i / (num_points - 1)
+            # Create S-curve
+            x = bounds[0] + width * t
+            y = center[1] + (height * 0.2) * math.sin(t * math.pi * 2)
+            
+            # Keep within park bounds
+            if park.polygon.contains(Point(x, y)):
+                path_points.append((x, y))
+        
+        if len(path_points) > 2:
+            return Road(
+                id=f"park_path_{park.id}_{path_id}",
+                points=path_points,
+                road_type='path',
+                width=2.0,
+                color='#90EE90'
+            )
+        
+        return None
+    
+    def _create_park_connecting_path(self, map_data: MapData, park, center: Tuple[float, float], 
+                                   path_id: int) -> Optional[Road]:
+        """Create connecting paths in larger parks."""
+        bounds = park.polygon.bounds
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+        
+        # Create diagonal or perpendicular paths
+        if path_id == 0:  # Diagonal path
+            start = (bounds[0] + width * 0.2, bounds[1] + height * 0.2)
+            end = (bounds[0] + width * 0.8, bounds[1] + height * 0.8)
+        else:  # Perpendicular path
+            start = (center[0], bounds[1] + height * 0.1)
+            end = (center[0], bounds[1] + height * 0.9)
+        
+        # Ensure points are within park
+        if park.polygon.contains(Point(start[0], start[1])) and park.polygon.contains(Point(end[0], end[1])):
+            path_points = self._create_natural_park_path(start, end, park)
+            
+            if len(path_points) > 2:
+                return Road(
+                    id=f"park_path_{park.id}_connecting_{path_id}",
+                    points=path_points,
+                    road_type='path',
+                    width=1.5,
+                    color='#90EE90'
+                )
+        
+        return None
+    
+    def _create_natural_park_path(self, start: Tuple[float, float], end: Tuple[float, float], 
+                                 park) -> List[Tuple[float, float]]:
+        """Create a natural-looking path between two points."""
+        points = [start]
+        
+        distance = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+        num_intermediate = max(3, int(distance / 60))
+        
+        for i in range(1, num_intermediate):
+            t = i / num_intermediate
+            
+            # Base interpolation
+            base_x = start[0] + (end[0] - start[0]) * t
+            base_y = start[1] + (end[1] - start[1]) * t
+            
+            # Add natural curves
+            curve_x = 20 * math.sin(t * math.pi * 3)
+            curve_y = 15 * math.cos(t * math.pi * 2)
+            
+            final_x = base_x + curve_x
+            final_y = base_y + curve_y
+            
+            # Keep within park bounds
+            if park.polygon.contains(Point(final_x, final_y)):
+                points.append((final_x, final_y))
+        
+        points.append(end)
+        return points
+    
+    def _find_scenic_points_in_park(self, map_data: MapData, park) -> List[Tuple[float, float]]:
+        """Find scenic points within a park for trails."""
+        scenic_points = []
+        bounds = park.polygon.bounds
+        
+        # Look for elevated points or interesting features
+        for y in range(int(bounds[1]), int(bounds[3]), 50):
+            for x in range(int(bounds[0]), int(bounds[2]), 50):
+                point = Point(x, y)
+                
+                if park.polygon.contains(point):
+                    grid_x = int(x / map_data.grid_size)
+                    grid_y = int(y / map_data.grid_size)
+                    
+                    if (0 <= grid_x < map_data.grid_width and 
+                        0 <= grid_y < map_data.grid_height):
+                        
+                        elevation = map_data.heightmap[grid_y, grid_x]
+                        # Look for slightly elevated points
+                        if elevation > 0.4:
+                            scenic_points.append((x, y))
+        
+        return scenic_points
+    
+    def _get_elevation_at_point(self, map_data: MapData, point: Tuple[float, float]) -> float:
+        """Get elevation at a world coordinate point."""
+        grid_x = int(point[0] / map_data.grid_size)
+        grid_y = int(point[1] / map_data.grid_size)
+        
+        if (0 <= grid_x < map_data.grid_width and 
+            0 <= grid_y < map_data.grid_height):
+            return map_data.heightmap[grid_y, grid_x]
+        
+        return 0.0
+    
+    def _find_nearest_road_point(self, map_data: MapData, point: Tuple[float, float]) -> Optional[Tuple[float, float]]:
+        """Find the nearest road point to a given location."""
+        min_distance = float('inf')
+        nearest_point = None
+        
+        for road in map_data.roads.values():
+            if hasattr(road, 'points') and road.points:
+                for road_point in road.points:
+                    distance = math.sqrt((road_point[0] - point[0])**2 + (road_point[1] - point[1])**2)
+                    if distance < min_distance:
+                        min_distance = distance
+                        nearest_point = road_point
+        
+        return nearest_point
     
     def generate_bridges(self, map_data: MapData, config: TransportationConfig):
         """
@@ -282,15 +895,18 @@ class AdvancedTransportationGenerator:
             best_end = self._find_natural_arterial_end(map_data, start_point)
             
             if best_end:
-                # Create organic arterial road
-                arterial = self._create_organic_arterial_road(
-                    map_data, start_point, best_end, f"arterial_{arterial_count}", config
-                )
-                
-                if arterial:
-                    map_data.add_road(arterial)
-                    self.arterial_spine.append(arterial)
-                    arterial_count += 1
+                # Check road density before creating arterial road
+                if self._check_road_density(start_point, 'arterial'):
+                    # Create organic arterial road
+                    arterial = self._create_organic_arterial_road(
+                        map_data, start_point, best_end, f"arterial_{arterial_count}", config
+                    )
+                    
+                    if arterial:
+                        map_data.add_road(arterial)
+                        self.arterial_spine.append(arterial)
+                        self._update_road_density(arterial.points, 'arterial')
+                        arterial_count += 1
         
         # Create secondary arterials that branch off main ones (reduced)
         self._create_secondary_arterials(map_data, config)
@@ -421,22 +1037,25 @@ class AdvancedTransportationGenerator:
                     nearest_road_distance = self._find_nearest_road_distance(map_data, (x, y))
                     
                     if nearest_road_distance > 200:  # Only if far from major roads
-                        # Create rural road
-                        rural_points = self._create_rural_road_path(map_data, (x, y))
-                        
-                        if len(rural_points) > 2:
-                            rural_road = Road(
-                                id=f"rural_{rural_count}",
-                                points=rural_points,
-                                road_type='rural',
-                                width=config.road_styles['rural']['width'],
-                                color=config.road_styles['rural']['color']
-                            )
-                            map_data.add_road(rural_road)
-                            rural_count += 1
+                        # Check road density before creating rural road
+                        if self._check_road_density((x, y), 'rural'):
+                            # Create rural road
+                            rural_points = self._create_rural_road_path(map_data, (x, y))
                             
-                            if rural_count >= max_rural:
-                                break
+                            if len(rural_points) > 2:
+                                rural_road = Road(
+                                    id=f"rural_{rural_count}",
+                                    points=rural_points,
+                                    road_type='rural',
+                                    width=config.road_styles['rural']['width'],
+                                    color=config.road_styles['rural']['color']
+                                )
+                                map_data.add_road(rural_road)
+                                self._update_road_density(rural_points, 'rural')
+                                rural_count += 1
+                                
+                                if rural_count >= max_rural:
+                                    break
         
         print(f"    → Created {rural_count} rural roads")
     
@@ -1437,7 +2056,7 @@ class AdvancedTransportationGenerator:
             return (dx/length, dy/length)
         return (1.0, 0.0)
     
-    def _find_nearest_road_point(self, point: Tuple[float, float], 
+    def _find_nearest_road_point_from_list(self, point: Tuple[float, float], 
                                 roads: List) -> Tuple[any, Tuple[float, float]]:
         """Find the nearest point on any of the given roads."""
         import math
@@ -1447,7 +2066,7 @@ class AdvancedTransportationGenerator:
         nearest_point = None
         
         for road in roads:
-            if not road.points:
+            if not hasattr(road, 'points') or not road.points:
                 continue
             
             for road_point in road.points:

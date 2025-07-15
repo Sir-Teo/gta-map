@@ -84,6 +84,8 @@ class MapGenerator:
             ("Defining urban structure", self._plan_urban_layout),
             ("Placing buildings", self._generate_buildings),
             ("Adding natural features", self._generate_features),
+            ("Creating park paths and trails", self._generate_park_paths),
+            ("Building mountain roads", self._generate_mountain_roads),
         ]
         
         self._generation_steps = steps
@@ -188,6 +190,22 @@ class MapGenerator:
         if hasattr(self.features_generator, 'generate_all_city_features'):
             self.features_generator.generate_all_city_features(self.map_data, self.config)
     
+    def _generate_park_paths(self):
+        """Generate walking paths and trails within parks."""
+        if not self.transportation_generator:
+            raise ValueError("Transportation generator not set")
+        
+        if hasattr(self.transportation_generator, 'generate_park_paths'):
+            self.transportation_generator.generate_park_paths(self.map_data, self.config.transportation)
+    
+    def _generate_mountain_roads(self):
+        """Generate scenic mountain roads and access routes."""
+        if not self.transportation_generator:
+            raise ValueError("Transportation generator not set")
+        
+        if hasattr(self.transportation_generator, 'generate_mountain_roads'):
+            self.transportation_generator.generate_mountain_roads(self.map_data, self.config.transportation)
+    
     def get_generation_progress(self) -> Dict[str, Any]:
         """Get current generation progress information."""
         if not self._generation_steps:
@@ -236,14 +254,14 @@ class MapGeneratorFactory:
         # (These will be created in subsequent steps)
         from ..modules.terrain import TerrainGenerator
         from ..modules.districts import DistrictGenerator  
-        from ..modules.transportation import TransportationGenerator
+        from ..modules.transportation import AdvancedTransportationGenerator
         from ..modules.urban_planning import UrbanPlanner
         from ..modules.buildings import BuildingGenerator
         from ..modules.features import FeaturesGenerator
         
         generator.set_terrain_generator(TerrainGenerator())
         generator.set_district_generator(DistrictGenerator())
-        generator.set_transportation_generator(TransportationGenerator())
+        generator.set_transportation_generator(AdvancedTransportationGenerator())
         generator.set_urban_planner(UrbanPlanner())
         generator.set_building_generator(BuildingGenerator())
         generator.set_features_generator(FeaturesGenerator())

@@ -63,6 +63,7 @@ class TransportationConfig:
         'local': {'color': '#b0b0b0', 'width': 3.5},    # Wider, lighter for city feel
         'rural': {'color': '#cccccc', 'width': 2},      # Wider, pale
         'path': {'color': '#e0e0e0', 'width': 1.5},     # Slightly wider
+        'mountain': {'color': '#8B4513', 'width': 2.5}, # Brown mountain roads
         'railway': {'color': '#8B4513', 'width': 4}     # Slightly wider
     })
     
