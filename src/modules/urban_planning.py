@@ -2,7 +2,7 @@
 Urban planning module.
 Handles city block definition, zoning, and urban structure.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from shapely.geometry import Polygon, LineString, Point
 from shapely.ops import polygonize
 
@@ -17,7 +17,7 @@ class UrbanPlanner:
     
     def define_city_blocks(self, map_data: MapData, config: MapConfig):
         """
-        Detect city blocks as polygons enclosed by roads.
+        Detect city blocks as organic polygons enclosed by roads.
         
         Args:
             map_data: The map data container to populate
@@ -43,17 +43,17 @@ class UrbanPlanner:
             polygons = list(polygonize(all_lines))
             print(f"✓ {len(polygons)} potential city blocks found.")
             
-            # If no polygons found, create some basic rectangular blocks
+            # If no polygons found, create organic city blocks
             if len(polygons) == 0:
-                print("No polygons from roads, creating basic city blocks...")
-                polygons = self._create_basic_city_blocks(map_data)
-                print(f"✓ Created {len(polygons)} basic city blocks.")
+                print("No polygons from roads, creating organic city blocks...")
+                polygons = self._create_organic_city_blocks(map_data)
+                print(f"✓ Created {len(polygons)} organic city blocks.")
                 
         except Exception as e:
             print(f"Error in polygonize: {e}")
-            print("Creating basic city blocks as fallback...")
-            polygons = self._create_basic_city_blocks(map_data)
-            print(f"✓ Created {len(polygons)} basic city blocks.")
+            print("Creating organic city blocks as fallback...")
+            polygons = self._create_organic_city_blocks(map_data)
+            print(f"✓ Created {len(polygons)} organic city blocks.")
 
         # Create district lookup for assigning block types
         district_lookup = self._create_district_lookup(map_data)
@@ -146,15 +146,17 @@ class UrbanPlanner:
         # - Validate transportation access
         # etc.
     
-    def _create_basic_city_blocks(self, map_data: MapData) -> List[Polygon]:
-        """Create basic rectangular city blocks when roads don't form polygons."""
+    def _create_organic_city_blocks(self, map_data: MapData) -> List[Polygon]:
+        """Create organic city blocks that follow terrain and natural features."""
         blocks = []
-        block_size = 150  # Size of each block
-        margin = 50       # Margin from edges
         
-        # Create a grid of blocks
-        for x in range(margin, map_data.width - margin, block_size + 20):
-            for y in range(margin, map_data.height - margin, block_size + 20):
+        # Create organic blocks based on terrain and existing roads
+        block_size = 200  # Base size for organic blocks
+        margin = 100      # Margin from edges
+        
+        # Sample points across the map to create organic blocks
+        for x in range(margin, map_data.width - margin, block_size + 50):
+            for y in range(margin, map_data.height - margin, block_size + 50):
                 # Check if this area is mostly on land
                 center_x = x + block_size / 2
                 center_y = y + block_size / 2
@@ -166,16 +168,71 @@ class UrbanPlanner:
                     0 <= grid_y < map_data.grid_height and 
                     map_data.land_mask[grid_y, grid_x]):
                     
-                    # Create rectangular block
-                    block = Polygon([
-                        (x, y),
-                        (x + block_size, y),
-                        (x + block_size, y + block_size),
-                        (x, y + block_size),
-                        (x, y)
-                    ])
+                    # Create organic block shape
+                    block = self._create_organic_block_shape(center_x, center_y, block_size, map_data)
                     
-                    if block.is_valid and block.area > 1000:
+                    if block and block.is_valid and block.area > 1000:
                         blocks.append(block)
         
-        return blocks 
+        return blocks
+    
+    def _create_organic_block_shape(self, center_x: float, center_y: float, base_size: float, map_data: MapData) -> Optional[Polygon]:
+        """Create an organic block shape that follows terrain contours."""
+        import math
+        import random
+        
+        # Create organic polygon with terrain influence
+        num_points = 6  # Hexagonal base
+        points = []
+        
+        for i in range(num_points):
+            angle = (i / num_points) * 2 * math.pi
+            
+            # Base radius with variation
+            radius = base_size / 2 + random.uniform(-20, 20)
+            
+            # Add terrain influence
+            terrain_influence = self._get_terrain_influence_at_point(map_data, center_x, center_y)
+            radius += terrain_influence * 30
+            
+            # Calculate point
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            
+            # Ensure point is within map bounds
+            x = max(50, min(map_data.width - 50, x))
+            y = max(50, min(map_data.height - 50, y))
+            
+            points.append((x, y))
+        
+        # Close the polygon
+        if len(points) >= 3:
+            points.append(points[0])
+            try:
+                return Polygon(points)
+            except Exception:
+                return None
+        
+        return None
+    
+    def _get_terrain_influence_at_point(self, map_data: MapData, x: float, y: float) -> float:
+        """Get terrain influence at a specific point."""
+        if map_data.heightmap is None:
+            return 0.0
+        
+        grid_x = int(x / map_data.grid_size)
+        grid_y = int(y / map_data.grid_size)
+        
+        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
+            return 0.0
+        
+        # Sample elevation and calculate influence
+        elevation = map_data.heightmap[grid_y, grid_x]
+        
+        # Higher elevation creates more irregular shapes
+        if elevation > 0.6:
+            return 0.5  # More variation in mountainous areas
+        elif elevation > 0.4:
+            return 0.2  # Moderate variation in hilly areas
+        else:
+            return 0.0  # Less variation in flat areas 

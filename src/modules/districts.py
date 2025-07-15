@@ -442,72 +442,258 @@ class AdvancedDistrictGenerator:
         self._place_districts_around_center(map_data, settlement, district_types, config)
     
     def _place_districts_around_center(self, map_data: MapData, settlement: Dict, district_types: List[Tuple], config: DistrictConfig):
-        """Place districts in a realistic pattern around settlement center."""
+        """Place districts organically around a settlement center."""
+        import math
+        import random
+        from shapely.geometry import Point
         
         center_x, center_y = settlement['location']
-        base_radius = settlement['radius']
+        settlement_type = settlement['type']
         
-        for i, (district_type, min_radius_mult, max_radius_mult) in enumerate(district_types):
+        # Determine organic placement based on settlement type
+        if settlement_type == 'major_city':
+            max_districts = 8
+            radius_range = (150, 400)
+        elif settlement_type == 'city':
+            max_districts = 6
+            radius_range = (120, 300)
+        elif settlement_type == 'town':
+            max_districts = 4
+            radius_range = (100, 250)
+        else:  # village
+            max_districts = 2
+            radius_range = (80, 200)
+        
+        placed_districts = []
+        
+        for district_type, min_radius_mult, max_radius_mult in district_types:
+            if len(placed_districts) >= max_districts:
+                break
             
-            # Calculate district placement
-            angle = (i / len(district_types)) * 2 * math.pi + random.uniform(-0.5, 0.5)
-            
-            # Distance from center
-            min_distance = base_radius * min_radius_mult
-            max_distance = base_radius * max_radius_mult
-            distance = random.uniform(min_distance, max_distance)
-            
-            # Special placement rules
-            if district_type == 'downtown':
-                # Downtown goes in the center
-                district_x, district_y = center_x, center_y
-                district_radius = base_radius * 0.3
-                
-            elif district_type == 'port':
-                # Ports go toward water
-                water_direction = self._find_water_direction(map_data, center_x, center_y)
-                if water_direction is not None:
-                    angle = water_direction
-                district_x = center_x + math.cos(angle) * distance
-                district_y = center_y + math.sin(angle) * distance
-                district_radius = base_radius * 0.4
-                
-            elif district_type == 'airport':
-                # Airports go away from city center, prefer flat areas
-                angle = self._find_flat_direction(map_data, center_x, center_y, base_radius)
-                district_x = center_x + math.cos(angle) * distance
-                district_y = center_y + math.sin(angle) * distance
-                district_radius = base_radius * 0.6
-                
-            elif district_type == 'industrial':
-                # Industrial areas prefer river/rail access, downwind
-                if random.random() > 0.5:
-                    river_direction = self._find_river_direction(map_data, center_x, center_y)
-                    if river_direction is not None:
-                        angle = river_direction
-                
-                district_x = center_x + math.cos(angle) * distance
-                district_y = center_y + math.sin(angle) * distance
-                district_radius = base_radius * 0.5
-                
-            else:
-                # Default placement
-                district_x = center_x + math.cos(angle) * distance
-                district_y = center_y + math.sin(angle) * distance
-                district_radius = base_radius * random.uniform(0.3, 0.6)
-            
-            # Ensure district is on land and within map bounds
-            if self._is_valid_district_location(map_data, district_x, district_y, district_radius):
-                
-                # Create district
-                district = self._create_district(
-                    district_x, district_y, district_radius, district_type, 
-                    settlement, config
+            # Try multiple times to find a good location
+            for attempt in range(10):
+                # Create organic placement
+                placement = self._find_organic_district_placement(
+                    map_data, center_x, center_y, district_type, radius_range, placed_districts
                 )
                 
-                if district:
-                    map_data.add_district(district)
-                    settlement['districts'].append(district.id)
+                if placement:
+                    x, y, radius = placement
+                    
+                    # Create organic district shape
+                    district_shape = self._create_organic_district_shape(x, y, radius, district_type, map_data)
+                    
+                    if district_shape and district_shape.is_valid:
+                        # Convert polygon to vertices
+                        vertices = list(district_shape.exterior.coords)
+                        
+                        district = District(
+                            id=f"{district_type}_{len(map_data.districts)}",
+                            district_type=district_type,
+                            center=(x, y),
+                            vertices=vertices,
+                            radius=radius
+                        )
+                        
+                        map_data.add_district(district)
+                        placed_districts.append(district)
+                        break
+        
+        return placed_districts
+    
+    def _find_organic_district_placement(self, map_data: MapData, center_x: float, center_y: float, 
+                                       district_type: str, radius_range: Tuple[float, float], 
+                                       existing_districts: List) -> Optional[Tuple[float, float, float]]:
+        """Find organic placement for a district that follows terrain and natural features."""
+        import math
+        import random
+        
+        min_radius, max_radius = radius_range
+        
+        # Try different angles and distances
+        for attempt in range(20):
+            # Random angle
+            angle = random.uniform(0, 2 * math.pi)
+            
+            # Random distance within range
+            distance = random.uniform(min_radius, max_radius)
+            
+            # Calculate position
+            x = center_x + distance * math.cos(angle)
+            y = center_y + distance * math.sin(angle)
+            
+            # Check if position is valid
+            if self._is_valid_organic_district_location(map_data, x, y, district_type):
+                # Check distance from existing districts
+                too_close = False
+                for existing in existing_districts:
+                    if existing.center:
+                        dist = math.sqrt((x - existing.center[0])**2 + (y - existing.center[1])**2)
+                        if dist < 100:  # Minimum separation
+                            too_close = True
+                            break
+                
+                if not too_close:
+                    # Determine organic radius based on terrain and district type
+                    radius = self._calculate_organic_district_radius(
+                        map_data, x, y, district_type, min_radius, max_radius
+                    )
+                    
+                    return (x, y, radius)
+        
+        return None
+    
+    def _is_valid_organic_district_location(self, map_data: MapData, x: float, y: float, district_type: str) -> bool:
+        """Check if a location is valid for organic district placement."""
+        import math
+        
+        # Check map bounds
+        if x < 100 or x > map_data.width - 100 or y < 100 or y > map_data.height - 100:
+            return False
+        
+        # Check if on land
+        grid_x = int(x / map_data.grid_size)
+        grid_y = int(y / map_data.grid_size)
+        
+        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
+            return False
+        
+        if not map_data.land_mask[grid_y, grid_x]:
+            return False
+        
+        # Check elevation suitability
+        elevation = map_data.heightmap[grid_y, grid_x]
+        
+        if district_type in ['airport', 'industrial']:
+            # Prefer flatter areas
+            if elevation > 0.6:
+                return False
+        elif district_type in ['downtown', 'commercial']:
+            # Prefer moderate elevation
+            if elevation < 0.3 or elevation > 0.7:
+                return False
+        elif district_type in ['residential', 'suburban']:
+            # More flexible with elevation
+            if elevation > 0.8:
+                return False
+        
+        # Check water proximity
+        water_distance = self._calculate_water_distance(map_data, grid_x, grid_y)
+        
+        if district_type in ['port', 'beach']:
+            # Must be near water
+            if water_distance > 3:
+                return False
+        elif district_type in ['downtown', 'commercial']:
+            # Prefer some water proximity
+            if water_distance > 15:
+                return False
+        
+        return True
+    
+    def _calculate_organic_district_radius(self, map_data: MapData, x: float, y: float, 
+                                         district_type: str, min_radius: float, max_radius: float) -> float:
+        """Calculate organic district radius based on terrain and district type."""
+        import math
+        import random
+        
+        grid_x = int(x / map_data.grid_size)
+        grid_y = int(y / map_data.grid_size)
+        
+        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
+            return min_radius
+        
+        elevation = map_data.heightmap[grid_y, grid_x]
+        
+        # Base radius
+        base_radius = random.uniform(min_radius, max_radius)
+        
+        # Adjust based on district type
+        if district_type == 'downtown':
+            base_radius *= 1.2  # Larger downtown areas
+        elif district_type == 'industrial':
+            base_radius *= 1.1  # Larger industrial areas
+        elif district_type in ['residential', 'suburban']:
+            base_radius *= 0.9  # Smaller residential areas
+        elif district_type in ['port', 'airport']:
+            base_radius *= 1.3  # Larger infrastructure areas
+        
+        # Adjust based on terrain
+        if elevation > 0.6:
+            base_radius *= 0.8  # Smaller in mountainous areas
+        elif elevation < 0.4:
+            base_radius *= 1.1  # Larger in flat areas
+        
+        return max(min_radius, min(max_radius, base_radius))
+    
+    def _create_organic_district_shape(self, center_x: float, center_y: float, radius: float, 
+                                     district_type: str, map_data: MapData) -> Optional[Polygon]:
+        """Create an organic district shape that follows terrain contours."""
+        import math
+        import random
+        from shapely.geometry import Point
+        
+        # Determine number of points based on district type
+        if district_type in ['downtown', 'commercial']:
+            num_points = 8  # More complex shapes for urban areas
+        elif district_type in ['industrial', 'port', 'airport']:
+            num_points = 6  # Medium complexity for infrastructure
+        else:
+            num_points = 5  # Simpler shapes for residential areas
+        
+        points = []
+        
+        for i in range(num_points):
+            angle = (i / num_points) * 2 * math.pi
+            
+            # Base radius with organic variation
+            base_radius = radius + random.uniform(-radius * 0.2, radius * 0.2)
+            
+            # Add terrain influence
+            terrain_influence = self._get_terrain_influence_at_point(map_data, center_x, center_y)
+            adjusted_radius = base_radius + terrain_influence * radius * 0.3
+            
+            # Calculate point
+            x = center_x + adjusted_radius * math.cos(angle)
+            y = center_y + adjusted_radius * math.sin(angle)
+            
+            # Ensure point is within map bounds
+            x = max(50, min(map_data.width - 50, x))
+            y = max(50, min(map_data.height - 50, y))
+            
+            points.append((x, y))
+        
+        # Close the polygon
+        if len(points) >= 3:
+            points.append(points[0])
+            try:
+                return Polygon(points)
+            except Exception:
+                return None
+        
+        return None
+    
+    def _get_terrain_influence_at_point(self, map_data: MapData, x: float, y: float) -> float:
+        """Get terrain influence at a specific point."""
+        if map_data.heightmap is None:
+            return 0.0
+        
+        grid_x = int(x / map_data.grid_size)
+        grid_y = int(y / map_data.grid_size)
+        
+        if not (0 <= grid_x < map_data.grid_width and 0 <= grid_y < map_data.grid_height):
+            return 0.0
+        
+        # Sample elevation and calculate influence
+        elevation = map_data.heightmap[grid_y, grid_x]
+        
+        # Higher elevation creates more irregular shapes
+        if elevation > 0.6:
+            return 0.5  # More variation in mountainous areas
+        elif elevation > 0.4:
+            return 0.2  # Moderate variation in hilly areas
+        else:
+            return 0.0  # Less variation in flat areas
     
     def _is_coastal_settlement(self, map_data: MapData, x: float, y: float) -> bool:
         """Check if settlement is near coast."""

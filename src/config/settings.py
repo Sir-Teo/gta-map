@@ -23,8 +23,8 @@ class TerrainConfig:
 @dataclass
 class DistrictConfig:
     """Configuration for district placement and generation."""
-    district_count: int = 10
-    minimum_district_distance: float = 300.0
+    district_count: int = 6  # Reduced for more organic placement
+    minimum_district_distance: float = 500.0  # Increased for more organic spacing
     colors: Dict[str, str] = field(default_factory=lambda: {
         'downtown': '#ff9900',
         'commercial': '#33cc33',
@@ -46,24 +46,24 @@ class DistrictConfig:
 @dataclass
 class TransportationConfig:
     """Configuration for road and transportation networks."""
-    arterial_spacing: int = 400
-    collector_spacing: int = 200
-    local_road_density: float = 0.3
-    road_curve_factor: float = 0.2
-    highway_count_range: Tuple[int, int] = (3, 6)
+    arterial_spacing: int = 800  # Increased for much more organic spacing
+    collector_spacing: int = 500  # Increased for much more organic spacing
+    local_road_density: float = 0.2  # Reduced for less cluttered local roads
+    road_curve_factor: float = 0.6  # Increased for more natural curves
+    highway_count_range: Tuple[int, int] = (1, 3)  # Reduced for less grid-like highways
     enable_bridges: bool = True
     enable_tunnels: bool = True
     enable_railways: bool = True
-    elevation_cost_factor: float = 1.0
+    elevation_cost_factor: float = 2.0  # Increased to make roads follow terrain more
     
     road_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
-        'arterial': {'color': '#333333', 'width': 8},
-        'collector': {'color': '#555555', 'width': 5},
-        'highway': {'color': '#000000', 'width': 12},
-        'local': {'color': '#777777', 'width': 3},
-        'rural': {'color': '#999999', 'width': 2},
-        'path': {'color': '#bbbbbb', 'width': 1},
-        'railway': {'color': '#8B4513', 'width': 6}
+        'arterial': {'color': '#444444', 'width': 4},  # Thinner arterial roads
+        'collector': {'color': '#666666', 'width': 3},  # Thinner collector roads
+        'highway': {'color': '#000000', 'width': 6},    # Thinner highways
+        'local': {'color': '#888888', 'width': 2},      # Much thinner local roads
+        'rural': {'color': '#aaaaaa', 'width': 1},      # Very thin rural roads
+        'path': {'color': '#cccccc', 'width': 1},       # Thin paths
+        'railway': {'color': '#8B4513', 'width': 3}     # Thinner railways
     })
     
     bridge_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
