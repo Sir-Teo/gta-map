@@ -187,22 +187,17 @@ class AdvancedTransportationGenerator:
                 self.road_density_map[(grid_x, grid_y)] += 1
     
     def _find_mountain_areas(self, map_data: MapData) -> List[Tuple[float, float]]:
-        """Find suitable mountain areas for scenic roads."""
+        """Find suitable mountain areas for scenic roads, allow more areas for denser coverage."""
         mountain_areas = []
-        
-        for y in range(0, map_data.grid_height, 5):
-            for x in range(0, map_data.grid_width, 5):
+        for y in range(0, map_data.grid_height, 4):  # Denser sampling
+            for x in range(0, map_data.grid_width, 4):
                 if (map_data.heightmap[y, x] > 0.65 and 
                     map_data.land_mask[y, x]):
-                    
-                    # Check if this is a good mountain area (high elevation, accessible)
                     world_x = x * map_data.grid_size
                     world_y = y * map_data.grid_size
-                    
                     if self._is_good_mountain_area(map_data, world_x, world_y):
                         mountain_areas.append((world_x, world_y))
-        
-        return mountain_areas[:6]  # Limit to 6 mountain areas
+        return mountain_areas[:12]  # Allow up to 12 mountain areas
     
     def _is_good_mountain_area(self, map_data: MapData, x: float, y: float) -> bool:
         """Check if a mountain area is suitable for scenic roads."""
@@ -228,29 +223,32 @@ class AdvancedTransportationGenerator:
     
     def _generate_scenic_mountain_road(self, map_data: MapData, mountain_center: Tuple[float, float], 
                                      road_id: str, config: TransportationConfig):
-        """Generate a scenic mountain road with switchbacks."""
+        """Generate a scenic mountain road with switchbacks, allow more per area."""
         if not self._check_road_density(mountain_center, 'mountain'):
             return
-        
         # Find start point at lower elevation
         start_point = self._find_mountain_road_start(map_data, mountain_center)
         if not start_point:
             return
-        
-        # Generate switchback path to mountain peak
-        switchback_points = self._create_switchback_path(map_data, start_point, mountain_center)
-        
-        if len(switchback_points) > 3:
-            mountain_road = Road(
-                id=road_id,
-                points=switchback_points,
-                road_type='mountain',
-                width=config.road_styles['rural']['width'],
-                color='#8B4513'
+        # Generate multiple switchback paths from different angles
+        for offset in range(0, 360, 90):  # Four directions
+            angle_rad = math.radians(offset)
+            offset_point = (
+                mountain_center[0] + 60 * math.cos(angle_rad),
+                mountain_center[1] + 60 * math.sin(angle_rad)
             )
-            map_data.add_road(mountain_road)
-            self.mountain_roads.append(mountain_road)
-            self._update_road_density(switchback_points, 'mountain')
+            switchback_points = self._create_switchback_path(map_data, start_point, offset_point)
+            if len(switchback_points) > 3 and not self._road_too_close(map_data, switchback_points, min_dist=40):
+                mountain_road = Road(
+                    id=f"{road_id}_dir{offset}",
+                    points=self._smooth_path(switchback_points),
+                    road_type='mountain',
+                    width=config.road_styles['rural']['width'],
+                    color='#8B4513'
+                )
+                map_data.add_road(mountain_road)
+                self.mountain_roads.append(mountain_road)
+                self._update_road_density(switchback_points, 'mountain')
     
     def _find_mountain_road_start(self, map_data: MapData, mountain_center: Tuple[float, float]) -> Optional[Tuple[float, float]]:
         """Find a good starting point for a mountain road."""
@@ -476,140 +474,140 @@ class AdvancedTransportationGenerator:
             self._generate_basic_park_paths(map_data, park, config)
     
     def _generate_national_park_paths(self, map_data: MapData, park, config: TransportationConfig):
-        """Generate hiking trails and scenic paths in national parks."""
+        """Generate hiking trails and scenic paths in national parks, with more density."""
         center = getattr(park, 'center', park.polygon.centroid)
         center_point = (center.x if hasattr(center, 'x') else center[0], 
                        center.y if hasattr(center, 'y') else center[1])
-        
         # Generate main trail loop
         main_trail = self._create_park_trail_loop(map_data, park, center_point, 'main')
         if main_trail:
             map_data.add_road(main_trail)
             self.park_paths.append(main_trail)
-        
-        # Generate hiking trails to scenic points
+        # Generate more hiking trails to scenic points
         scenic_points = self._find_scenic_points_in_park(map_data, park)
-        for i, scenic_point in enumerate(scenic_points[:3]):
+        for i, scenic_point in enumerate(scenic_points[:6]):  # Up to 6 trails
             trail = self._create_park_trail(map_data, park, center_point, scenic_point, f"trail_{i}")
             if trail:
                 map_data.add_road(trail)
                 self.park_paths.append(trail)
+        # Add random cross trails for large parks
+        if park.polygon.area > 20000:
+            for j in range(3):
+                import random
+                angle = random.uniform(0, 2 * math.pi)
+                dist = random.uniform(0.2, 0.4) * min(park.polygon.bounds[2] - park.polygon.bounds[0], park.polygon.bounds[3] - park.polygon.bounds[1])
+                start = (center_point[0] + dist * math.cos(angle), center_point[1] + dist * math.sin(angle))
+                end = (center_point[0] - dist * math.cos(angle), center_point[1] - dist * math.sin(angle))
+                if park.polygon.contains(Point(start)) and park.polygon.contains(Point(end)):
+                    cross_trail = self._create_park_trail(map_data, park, start, end, f"cross_{j}")
+                    if cross_trail:
+                        map_data.add_road(cross_trail)
+                        self.park_paths.append(cross_trail)
     
     def _generate_urban_park_paths(self, map_data: MapData, park, config: TransportationConfig):
-        """Generate walking paths in urban parks."""
+        """Generate walking paths in urban parks, with more density for large parks."""
         center = getattr(park, 'center', park.polygon.centroid)
         center_point = (center.x if hasattr(center, 'x') else center[0], 
                        center.y if hasattr(center, 'y') else center[1])
-        
-        # Generate main walking path
         main_path = self._create_park_walking_path(map_data, park, center_point, 'main')
         if main_path:
             map_data.add_road(main_path)
             self.park_paths.append(main_path)
-        
-        # Generate connecting paths
-        if park.polygon.area > 5000:  # Larger parks get more paths
-            for i in range(2):
-                connecting_path = self._create_park_connecting_path(map_data, park, center_point, i)
-                if connecting_path:
-                    map_data.add_road(connecting_path)
-                    self.park_paths.append(connecting_path)
+        # More connecting paths for larger parks
+        extra_paths = 2 + int(park.polygon.area // 8000)
+        for i in range(extra_paths):
+            connecting_path = self._create_park_connecting_path(map_data, park, center_point, i)
+            if connecting_path:
+                map_data.add_road(connecting_path)
+                self.park_paths.append(connecting_path)
     
     def _generate_basic_park_paths(self, map_data: MapData, park, config: TransportationConfig):
-        """Generate basic paths for smaller parks."""
+        """Generate basic paths for smaller parks, always at least one path."""
         center = getattr(park, 'center', park.polygon.centroid)
         center_point = (center.x if hasattr(center, 'x') else center[0], 
                        center.y if hasattr(center, 'y') else center[1])
-        
-        # Single main path
         main_path = self._create_park_walking_path(map_data, park, center_point, 'main')
         if main_path:
             map_data.add_road(main_path)
             self.park_paths.append(main_path)
+        # For medium parks, add a second path
+        if park.polygon.area > 4000:
+            connecting_path = self._create_park_connecting_path(map_data, park, center_point, 0)
+            if connecting_path:
+                map_data.add_road(connecting_path)
+                self.park_paths.append(connecting_path)
     
     def _create_park_trail_loop(self, map_data: MapData, park, center: Tuple[float, float], 
                                trail_id: str) -> Optional[Road]:
-        """Create a main trail loop in a park."""
+        """Create a main trail loop in a park, with more natural curves and width variation."""
         bounds = park.polygon.bounds
         width = bounds[2] - bounds[0]
         height = bounds[3] - bounds[1]
-        
-        # Create loop points
         loop_points = []
-        num_points = 8
+        num_points = 10
         radius = min(width, height) * 0.3
-        
         for i in range(num_points):
             angle = (i / num_points) * 2 * math.pi
             x = center[0] + radius * math.cos(angle)
             y = center[1] + radius * math.sin(angle)
-            
-            # Keep within park bounds
+            # Add gentle random offset for more natural look
+            import random
+            x += random.uniform(-8, 8)
+            y += random.uniform(-8, 8)
             if park.polygon.contains(Point(x, y)):
                 loop_points.append((x, y))
-        
-        # Close the loop
         if loop_points:
             loop_points.append(loop_points[0])
-        
         if len(loop_points) > 3:
             return Road(
                 id=f"park_trail_{park.id}_{trail_id}",
-                points=loop_points,
+                points=self._apply_organic_smoothing(loop_points, 'city'),
                 road_type='path',
-                width=1.5,
-                color='#8FBC8F'
+                width=1.2 + 0.6 * random.random(),  # Vary width
+                color=random.choice(['#8FBC8F', '#6B8E23', '#228B22'])
             )
-        
         return None
     
     def _create_park_trail(self, map_data: MapData, park, start: Tuple[float, float], 
                           end: Tuple[float, float], trail_id: str) -> Optional[Road]:
-        """Create a trail between two points in a park."""
-        # Simple path with some natural curves
+        """Create a trail between two points in a park, with more natural curves and width variation."""
+        import random
         path_points = self._create_natural_park_path(start, end, park)
-        
         if len(path_points) > 2:
             return Road(
                 id=f"park_trail_{park.id}_{trail_id}",
-                points=path_points,
+                points=self._apply_organic_smoothing(path_points, 'city'),
                 road_type='path',
-                width=1.0,
-                color='#8FBC8F'
+                width=0.8 + 0.7 * random.random(),
+                color=random.choice(['#8FBC8F', '#6B8E23', '#228B22'])
             )
-        
         return None
     
     def _create_park_walking_path(self, map_data: MapData, park, center: Tuple[float, float], 
                                  path_id: str) -> Optional[Road]:
-        """Create a walking path in an urban park."""
+        """Create a walking path in an urban park, with more natural curves and width variation."""
+        import random
         bounds = park.polygon.bounds
         width = bounds[2] - bounds[0]
         height = bounds[3] - bounds[1]
-        
-        # Create curved path
         path_points = []
-        num_points = 6
-        
+        num_points = 8
         for i in range(num_points):
             t = i / (num_points - 1)
-            # Create S-curve
             x = bounds[0] + width * t
             y = center[1] + (height * 0.2) * math.sin(t * math.pi * 2)
-            
-            # Keep within park bounds
+            x += random.uniform(-6, 6)
+            y += random.uniform(-6, 6)
             if park.polygon.contains(Point(x, y)):
                 path_points.append((x, y))
-        
         if len(path_points) > 2:
             return Road(
                 id=f"park_path_{park.id}_{path_id}",
-                points=path_points,
+                points=self._apply_organic_smoothing(path_points, 'city'),
                 road_type='path',
-                width=2.0,
-                color='#90EE90'
+                width=1.2 + 0.8 * random.random(),
+                color=random.choice(['#90EE90', '#32CD32', '#228B22'])
             )
-        
         return None
     
     def _create_park_connecting_path(self, map_data: MapData, park, center: Tuple[float, float], 
@@ -644,30 +642,21 @@ class AdvancedTransportationGenerator:
     
     def _create_natural_park_path(self, start: Tuple[float, float], end: Tuple[float, float], 
                                  park) -> List[Tuple[float, float]]:
-        """Create a natural-looking path between two points."""
+        """Create a natural-looking path between two points, with more curves."""
+        import random
         points = [start]
-        
         distance = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
-        num_intermediate = max(3, int(distance / 60))
-        
+        num_intermediate = max(4, int(distance / 40))
         for i in range(1, num_intermediate):
             t = i / num_intermediate
-            
-            # Base interpolation
             base_x = start[0] + (end[0] - start[0]) * t
             base_y = start[1] + (end[1] - start[1]) * t
-            
-            # Add natural curves
-            curve_x = 20 * math.sin(t * math.pi * 3)
-            curve_y = 15 * math.cos(t * math.pi * 2)
-            
+            curve_x = 18 * math.sin(t * math.pi * 3) + random.uniform(-8, 8)
+            curve_y = 13 * math.cos(t * math.pi * 2) + random.uniform(-8, 8)
             final_x = base_x + curve_x
             final_y = base_y + curve_y
-            
-            # Keep within park bounds
             if park.polygon.contains(Point(final_x, final_y)):
                 points.append((final_x, final_y))
-        
         points.append(end)
         return points
     
@@ -964,54 +953,42 @@ class AdvancedTransportationGenerator:
                     map_data.add_road(road)
     
     def _generate_collector_roads(self, map_data: MapData, config: TransportationConfig):
-        """Generate collector roads that connect arterials with proper hierarchy."""
+        """Generate collector roads that connect arterials with proper hierarchy and spacing."""
         print("    → Building collector road network...")
-        
-        # Get all arterial roads
         arterials = [road for road in map_data.roads.values() if road.road_type == 'arterial']
-        
         if len(arterials) < 2:
             return
-        
-        # Create collector roads with much better spacing
         collector_count = 0
-        max_collectors = 10  # Allow up to 10 collectors
-        
-        # Create collectors between arterials with proper spacing
+        max_collectors = 8  # Slightly fewer collectors for clarity
+        min_collector_distance = 350  # Increased minimum spacing
         for i, arterial1 in enumerate(arterials):
             if collector_count >= max_collectors:
                 break
-            
-            # Find best arterial to connect to (not adjacent ones)
             best_arterial = None
             best_distance = 0
-            
-            for j, arterial2 in enumerate(arterials[i+2:], i+2):  # Skip adjacent arterials
-                # Check distance between arterials
+            for j, arterial2 in enumerate(arterials[i+2:], i+2):
                 distance = self._calculate_arterial_distance(arterial1, arterial2)
-                
-                if 250 < distance < 1500 and distance > best_distance:  # Allow more connections, wider range
+                if min_collector_distance < distance < 1200 and distance > best_distance:
                     best_distance = distance
                     best_arterial = arterial2
-            
             if best_arterial:
-                # Create collector between these arterials
                 connections = self._find_arterial_connection_points(arterial1, best_arterial)
-                
-                for start_point, end_point in connections[:3]:  # Allow up to 3 connections
+                added = 0
+                for start_point, end_point in connections:
                     collector_path = self._create_organic_path(map_data, start_point, end_point, 'collector')
-                    
-                    if collector_path and len(collector_path) > 2:
+                    if collector_path and len(collector_path) > 2 and not self._road_too_close(map_data, collector_path, min_dist=80):
                         collector = Road(
                             id=f"collector_{collector_count}",
-                            points=collector_path,
+                            points=self._apply_organic_smoothing(collector_path, 'collector'),
                             road_type='collector',
                             width=config.road_styles['collector']['width'],
                             color=config.road_styles['collector']['color']
                         )
                         map_data.add_road(collector)
                         collector_count += 1
-        
+                        added += 1
+                        if added >= 2:  # Limit to 2 connections per arterial pair
+                            break
         print(f"    → Created {collector_count} collector roads")
     
     def _generate_rural_roads(self, map_data: MapData, config: TransportationConfig):
@@ -1110,16 +1087,20 @@ class AdvancedTransportationGenerator:
         return self._apply_organic_smoothing(points, 'rural')
     
     def _generate_organic_local_roads(self, map_data: MapData, config: TransportationConfig):
-        """Generate organic local roads that follow natural patterns."""
-        
+        """Generate organic local roads that follow natural patterns, with reduced overlap and chaos."""
         print("  → Creating organic local road networks...")
-        
-        # Generate organic local roads for districts with road access
         for district in map_data.districts.values():
             if district.polygon and district.district_type in ['residential', 'suburban', 'commercial']:
-                # Check if district is connected to road network
                 if self._district_has_road_access(map_data, district):
-                    self._generate_organic_district_roads(map_data, district, config)
+                    # Only generate if district is large enough
+                    min_size = 300  # Increased threshold
+                    minx, miny, maxx, maxy = district.polygon.bounds
+                    district_size = max(maxx - minx, maxy - miny)
+                    if district_size >= min_size:
+                        self._generate_organic_district_roads(map_data, district, config)
+                    else:
+                        # For small districts, add only a single main road
+                        self._create_residential_grid(map_data, district, config, 0)
     
     def _district_has_road_access(self, map_data: MapData, district) -> bool:
         """Check if a district has reasonable access to the road network."""
@@ -1149,30 +1130,26 @@ class AdvancedTransportationGenerator:
         return False
     
     def _generate_organic_district_roads(self, map_data: MapData, district, config: TransportationConfig):
-        """Generate organic local roads within a district."""
+        """Generate organic local roads within a district, with stricter limits and spacing."""
         import math
         import random
         from shapely.geometry import Point
-        
         if not district.polygon:
             return
-        
         minx, miny, maxx, maxy = district.polygon.bounds
         district_size = max(maxx - minx, maxy - miny)
-        
-        # Only add local roads if district is large enough
-        if district_size < 200:
+        if district_size < 300:
             return
-        
         road_id = 0
-        
-        # Create organic patterns based on district type
-        if district.district_type == 'residential':
+        # Use grid/radial for urban districts
+        if district.district_type in ['downtown', 'commercial']:
+            self._create_urban_grid_pattern(map_data, district, config, road_id)
+        elif district.district_type == 'residential':
             self._create_organic_residential_pattern(map_data, district, config, road_id)
         elif district.district_type == 'suburban':
-            self._create_organic_suburban_pattern(map_data, district, config, road_id)
-        elif district.district_type == 'commercial':
-            self._create_organic_commercial_pattern(map_data, district, config, road_id)
+            self._create_suburban_pattern(map_data, district, config, road_id)
+        elif district.district_type == 'industrial':
+            self._create_suburban_pattern(map_data, district, config, road_id)
     
     def _create_residential_grid(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
         """Create a simple residential grid pattern."""
@@ -1228,38 +1205,78 @@ class AdvancedTransportationGenerator:
                         map_data.add_road(side_street)
     
     def _create_suburban_pattern(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
-        """Create curved suburban roads."""
+        """Create enhanced suburban roads: more natural, winding, and hierarchical patterns with better connectivity."""
         import math
+        import random
         from shapely.geometry import Point
-        
         minx, miny, maxx, maxy = district.polygon.bounds
         center_x, center_y = (minx + maxx) / 2, (miny + maxy) / 2
-        
-        # Create 1-2 curved suburban streets
-        num_curves = 1 if (maxx - minx) < 300 else 2
-        
-        for i in range(num_curves):
-            # Create curved path through district
-            start_y = miny + (i + 1) * (maxy - miny) / (num_curves + 1)
-            
-            curved_points = []
-            for x in range(int(minx + 30), int(maxx - 30), 40):
-                # Create gentle S-curve
-                curve_offset = math.sin((x - minx) * 0.01) * 40
-                y_pos = start_y + curve_offset
-                
-                if district.polygon.contains(Point(x, y_pos)):
-                    curved_points.append((x, y_pos))
-            
-            if len(curved_points) > 3:
-                suburban_street = Road(
-                    id=f"suburban_curve_{district.id}_{start_id + i}",
-                    points=self._smooth_path(curved_points),
+        # Main loop road (winding)
+        loop_points = []
+        num_points = 18
+        radius_x = (maxx - minx) * 0.32
+        radius_y = (maxy - miny) * 0.32
+        for i in range(num_points):
+            angle = (i / num_points) * 2 * math.pi
+            base_x = center_x + radius_x * math.cos(angle)
+            base_y = center_y + radius_y * math.sin(angle)
+            # Add gentle S-curve and random offset
+            curve = math.sin(angle * 2.5) * 18
+            x = base_x + curve + random.uniform(-10, 10)
+            y = base_y + math.cos(angle * 1.7) * 12 + random.uniform(-10, 10)
+            if district.polygon.contains(Point(x, y)):
+                loop_points.append((x, y))
+        if loop_points and len(loop_points) > 2:
+            loop_points.append(loop_points[0])
+            loop_road = Road(
+                id=f"suburban_loop_{district.id}_{start_id}",
+                points=self._apply_organic_smoothing(loop_points, 'city'),
+                road_type='local',
+                width=config.road_styles['local']['width'],
+                color=config.road_styles['local']['color']
+            )
+            map_data.add_road(loop_road)
+        # Add 2-3 winding spurs/grid-like spurs for connectivity
+        for spur in range(2, 5):
+            angle = random.uniform(0, 2 * math.pi)
+            length = random.uniform(80, 180)
+            start_x = center_x + math.cos(angle) * radius_x * 0.8
+            start_y = center_y + math.sin(angle) * radius_y * 0.8
+            spur_points = [(start_x, start_y)]
+            for seg in range(1, 5):
+                t = seg / 4
+                # Mix between straight and curve
+                x = start_x + math.cos(angle) * length * t + math.sin(t * math.pi) * 18
+                y = start_y + math.sin(angle) * length * t + math.cos(t * math.pi) * 12
+                x += random.uniform(-8, 8)
+                y += random.uniform(-8, 8)
+                if district.polygon.contains(Point(x, y)):
+                    spur_points.append((x, y))
+            if len(spur_points) > 2:
+                spur_road = Road(
+                    id=f"suburban_spur_{district.id}_{start_id}_{spur}",
+                    points=self._apply_organic_smoothing(spur_points, 'city'),
                     road_type='local',
                     width=config.road_styles['local']['width'],
                     color=config.road_styles['local']['color']
                 )
-                map_data.add_road(suburban_street)
+                map_data.add_road(spur_road)
+        # Add a few short grid-like connections for hierarchy
+        for grid in range(2):
+            grid_points = []
+            base_x = minx + (maxx - minx) * random.uniform(0.2, 0.8)
+            for y in range(int(miny + 30), int(maxy - 30), 40):
+                if district.polygon.contains(Point(base_x, y)):
+                    grid_points.append((base_x, y))
+            if len(grid_points) > 2:
+                grid_road = Road(
+                    id=f"suburban_grid_{district.id}_{start_id}_{grid}",
+                    points=self._apply_organic_smoothing(grid_points, 'city'),
+                    road_type='local',
+                    width=config.road_styles['local']['width'],
+                    color=config.road_styles['local']['color']
+                )
+                map_data.add_road(grid_road)
     
     def _create_commercial_access(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
         """Create commercial access roads."""
@@ -2107,142 +2124,109 @@ class AdvancedTransportationGenerator:
         return 0
     
     def _create_organic_residential_pattern(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
-        """Create an organic residential pattern with curved streets and cul-de-sacs."""
+        """Create an organic residential pattern with curved streets and cul-de-sacs, with reduced overlap."""
         import math
         import random
         from shapely.geometry import Point
-        
         minx, miny, maxx, maxy = district.polygon.bounds
         district_center = district.polygon.centroid
-        
-        # Create organic main streets that follow terrain
         main_streets = []
-        
-        # Create only 1 main organic street (reduced from 1-2)
-        num_streets = 1
-        
+        num_streets = 1  # Only 1 main street
         for i in range(num_streets):
-            # Create organic main street
             start_point = (minx + 20, miny + (maxy - miny) / 2)
             end_point = (maxx - 20, miny + (maxy - miny) / 2)
-            
-            # Create organic path with curves
             street_points = self._create_organic_street_path(map_data, start_point, end_point, district)
-            
-            if len(street_points) > 2:
+            # Enforce minimum distance to other roads
+            if len(street_points) > 2 and not self._road_too_close(map_data, street_points, min_dist=60):
                 street = Road(
                     id=f"organic_residential_main_{start_id + i}",
-                    points=street_points,
+                    points=self._smooth_path(street_points),
                     road_type='local',
                     width=config.road_styles['local']['width'],
                     color=config.road_styles['local']['color']
                 )
                 map_data.add_road(street)
                 main_streets.append(street)
-        
-        # Add organic side streets and cul-de-sacs (much reduced)
-        self._add_organic_side_streets(map_data, district, main_streets, config, start_id + num_streets)
+        # Add at most 1 side street per main street
+        self._add_organic_side_streets(map_data, district, main_streets, config, start_id + num_streets, max_side_streets=1)
     
-    def _add_organic_side_streets(self, map_data: MapData, district, main_streets, config: TransportationConfig, start_id: int):
-        """Add organic side streets and cul-de-sacs to residential areas."""
+    def _add_organic_side_streets(self, map_data: MapData, district, main_streets, config: TransportationConfig, start_id: int, max_side_streets=1):
+        """Add organic side streets and cul-de-sacs to residential areas, with increased spacing and stricter limits."""
         import math
         import random
         from shapely.geometry import Point
-        
         road_id = start_id
-        
         for main_street in main_streets:
             if not main_street.points or len(main_street.points) < 3:
                 continue
-            
-            # Add side streets at intervals (much increased spacing)
-            for i in range(3, len(main_street.points) - 3, 10):  # Increased from 6 to 10
+            count = 0
+            for i in range(3, len(main_street.points) - 3, 14):  # Increased spacing
                 branch_point = main_street.points[i]
-                
-                # Create organic cul-de-sac
                 cul_de_sac_points = self._create_organic_cul_de_sac(map_data, district, branch_point)
-                
-                if len(cul_de_sac_points) > 2:
+                if len(cul_de_sac_points) > 2 and not self._road_too_close(map_data, cul_de_sac_points, min_dist=50):
                     cul_de_sac = Road(
                         id=f"organic_cul_de_sac_{road_id}",
-                        points=cul_de_sac_points,
+                        points=self._smooth_path(cul_de_sac_points),
                         road_type='local',
-                        width=config.road_styles['local']['width'] * 0.8,  # Narrower for cul-de-sacs
+                        width=config.road_styles['local']['width'] * 0.8,
                         color=config.road_styles['local']['color']
                     )
                     map_data.add_road(cul_de_sac)
                     road_id += 1
-                    
-                    # Limit cul-de-sacs per main street
-                    if road_id - start_id >= 2:
+                    count += 1
+                    if count >= max_side_streets:
                         break
     
-    def _add_organic_feeder_roads(self, map_data: MapData, district, loop_roads, config: TransportationConfig, start_id: int):
-        """Add organic feeder roads to suburban areas."""
+    def _add_organic_feeder_roads(self, map_data: MapData, district, loop_roads, config: TransportationConfig, start_id: int, max_feeder_roads=1):
+        """Add organic feeder roads to suburban areas, with increased spacing and stricter limits."""
         import math
         import random
         from shapely.geometry import Point
-        
         road_id = start_id
-        
         for loop_road in loop_roads:
             if not loop_road.points or len(loop_road.points) < 4:
                 continue
-            
-            # Add feeder roads at intervals (much increased spacing)
-            for i in range(4, len(loop_road.points) - 4, 12):  # Increased from 8 to 12
+            count = 0
+            for i in range(4, len(loop_road.points) - 4, 16):  # Increased spacing
                 branch_point = loop_road.points[i]
-                
-                # Create organic feeder road
                 feeder_points = self._create_organic_feeder_road(map_data, district, branch_point)
-                
-                if len(feeder_points) > 2:
+                if len(feeder_points) > 2 and not self._road_too_close(map_data, feeder_points, min_dist=50):
                     feeder_road = Road(
                         id=f"organic_feeder_{road_id}",
-                        points=feeder_points,
+                        points=self._smooth_path(feeder_points),
                         road_type='local',
                         width=config.road_styles['local']['width'],
                         color=config.road_styles['local']['color']
                     )
                     map_data.add_road(feeder_road)
                     road_id += 1
-                    
-                    # Limit feeder roads per loop
-                    if road_id - start_id >= 2:
+                    count += 1
+                    if count >= max_feeder_roads:
                         break
     
     def _create_organic_suburban_pattern(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
-        """Create an organic suburban pattern with winding roads and natural curves."""
+        """Create an organic suburban pattern with winding roads and natural curves, with reduced overlap."""
         import math
         import random
         from shapely.geometry import Point
-        
         minx, miny, maxx, maxy = district.polygon.bounds
         district_center = district.polygon.centroid
-        
-        # Create organic loop roads
         loop_roads = []
-        
-        # Create 1 main loop road (reduced from 1-2)
         num_loops = 1
-        
         for i in range(num_loops):
-            # Create organic loop road
             loop_points = self._create_organic_loop_road(map_data, district, i)
-            
-            if len(loop_points) > 3:
+            if len(loop_points) > 3 and not self._road_too_close(map_data, loop_points, min_dist=60):
                 loop_road = Road(
                     id=f"organic_suburban_loop_{start_id + i}",
-                    points=loop_points,
+                    points=self._smooth_path(loop_points),
                     road_type='local',
                     width=config.road_styles['local']['width'],
                     color=config.road_styles['local']['color']
                 )
                 map_data.add_road(loop_road)
                 loop_roads.append(loop_road)
-        
-        # Add organic feeder roads (reduced)
-        self._add_organic_feeder_roads(map_data, district, loop_roads, config, start_id + num_loops)
+        # Add at most 1 feeder road per loop
+        self._add_organic_feeder_roads(map_data, district, loop_roads, config, start_id + num_loops, max_feeder_roads=1)
     
     def _create_commercial_access(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
         """Create commercial access roads."""
@@ -3048,6 +3032,79 @@ class AdvancedTransportationGenerator:
                         )
                         map_data.add_road(connector_road)
                         connector_id += 1
+
+    def _road_too_close(self, map_data: MapData, new_points, min_dist=40):
+        """Check if a new road is too close to existing roads."""
+        import math
+        for road in map_data.roads.values():
+            for p1 in new_points:
+                for p2 in road.points:
+                    if math.hypot(p1[0] - p2[0], p1[1] - p2[1]) < min_dist:
+                        return True
+        return False
+
+    def _create_urban_grid_pattern(self, map_data: MapData, district, config: TransportationConfig, start_id: int):
+        """Create a grid or radial pattern for urban (downtown/commercial) districts."""
+        import math
+        import random
+        from shapely.geometry import Point
+        minx, miny, maxx, maxy = district.polygon.bounds
+        center_x, center_y = (minx + maxx) / 2, (miny + maxy) / 2
+        width = maxx - minx
+        height = maxy - miny
+        # Grid pattern
+        grid_spacing = max(60, min(width, height) // 6)
+        # Vertical streets
+        for i in range(1, int(width // grid_spacing)):
+            x = minx + i * grid_spacing
+            grid_points = []
+            for y in range(int(miny + 10), int(maxy - 10), int(grid_spacing // 2)):
+                if district.polygon.contains(Point(x, y)):
+                    grid_points.append((x, y))
+            if len(grid_points) > 2:
+                grid_road = Road(
+                    id=f"urban_grid_v_{district.id}_{start_id}_{i}",
+                    points=self._apply_organic_smoothing(grid_points, 'city'),
+                    road_type='local',
+                    width=config.road_styles['local']['width'],
+                    color=config.road_styles['local']['color']
+                )
+                map_data.add_road(grid_road)
+        # Horizontal streets
+        for j in range(1, int(height // grid_spacing)):
+            y = miny + j * grid_spacing
+            grid_points = []
+            for x in range(int(minx + 10), int(maxx - 10), int(grid_spacing // 2)):
+                if district.polygon.contains(Point(x, y)):
+                    grid_points.append((x, y))
+            if len(grid_points) > 2:
+                grid_road = Road(
+                    id=f"urban_grid_h_{district.id}_{start_id}_{j}",
+                    points=self._apply_organic_smoothing(grid_points, 'city'),
+                    road_type='local',
+                    width=config.road_styles['local']['width'],
+                    color=config.road_styles['local']['color']
+                )
+                map_data.add_road(grid_road)
+        # Optionally add a radial/diagonal for downtown
+        if district.district_type == 'downtown':
+            for angle_deg in [30, 60, 120, 150]:
+                angle = math.radians(angle_deg)
+                radial_points = [(center_x, center_y)]
+                for r in range(1, int(min(width, height) // 2), grid_spacing):
+                    x = center_x + math.cos(angle) * r
+                    y = center_y + math.sin(angle) * r
+                    if district.polygon.contains(Point(x, y)):
+                        radial_points.append((x, y))
+                if len(radial_points) > 2:
+                    radial_road = Road(
+                        id=f"urban_radial_{district.id}_{start_id}_{angle_deg}",
+                        points=self._apply_organic_smoothing(radial_points, 'city'),
+                        road_type='local',
+                        width=config.road_styles['local']['width'],
+                        color=config.road_styles['local']['color']
+                    )
+                    map_data.add_road(radial_road)
 
 
 # Backward compatibility with existing system

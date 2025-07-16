@@ -57,20 +57,20 @@ class TransportationConfig:
     elevation_cost_factor: float = 2.2  # Roads follow terrain even more
     
     road_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
-        'arterial': {'color': '#3a3a3a', 'width': 7},  # Wider, darker
-        'collector': {'color': '#5a5a5a', 'width': 5},  # Wider
-        'highway': {'color': '#222222', 'width': 11},   # Much wider, deep black
-        'local': {'color': '#b0b0b0', 'width': 3.5},    # Wider, lighter for city feel
-        'rural': {'color': '#cccccc', 'width': 2},      # Wider, pale
-        'path': {'color': '#e0e0e0', 'width': 1.5},     # Slightly wider
-        'mountain': {'color': '#8B4513', 'width': 2.5}, # Brown mountain roads
-        'railway': {'color': '#8B4513', 'width': 4}     # Slightly wider
+        'arterial': {'color': '#3a3a3a', 'width': 4},  # Thinner
+        'collector': {'color': '#5a5a5a', 'width': 2.5},  # Thinner
+        'highway': {'color': '#222222', 'width': 6},   # Thinner
+        'local': {'color': '#b0b0b0', 'width': 1.5},    # Thinner
+        'rural': {'color': '#cccccc', 'width': 1},      # Thinner
+        'path': {'color': '#e0e0e0', 'width': 0.7},     # Thinner
+        'mountain': {'color': '#8B4513', 'width': 1.2}, # Thinner
+        'railway': {'color': '#8B4513', 'width': 2.2}   # Thinner
     })
     
     bridge_styles: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
-        'highway': {'color': '#8B4513', 'width': 14},
-        'road': {'color': '#8B4513', 'width': 10},
-        'railway': {'color': '#654321', 'width': 8}
+        'highway': {'color': '#8B4513', 'width': 7},
+        'road': {'color': '#8B4513', 'width': 4.5},
+        'railway': {'color': '#654321', 'width': 2.5}
     })
 
 
